@@ -21,6 +21,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { initAi } from "./ai";
 import { initMenu } from "./menu";
+import { initChat } from "./chat";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -335,3 +336,4 @@ updateMeta();
 updateTitle();
 initAi();
 initMenu();
+initChat();

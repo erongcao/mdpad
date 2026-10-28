@@ -584,6 +584,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&mi(app, "view_editor", "源码", Some("CmdOrCtrl+1"))?)
         .item(&mi(app, "view_split", "分栏", Some("CmdOrCtrl+2"))?)
         .item(&mi(app, "view_preview", "预览", Some("CmdOrCtrl+3"))?)
+        .separator()
+        .item(&mi(app, "chat_toggle", "AI 对话", Some("CmdOrCtrl+J"))?)
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "窗口")

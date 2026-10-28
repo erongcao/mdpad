@@ -28,6 +28,28 @@
       <section class="pane preview-pane">
         <article class="markdown-body" id="preview"></article>
       </section>
+      <div class="divider" id="chat-divider" hidden></div>
+      <aside class="chat-pane" id="chat-panel" hidden>
+        <header id="chat-header">
+          <span id="chat-title">AI 对话</span>
+          <span class="spacer"></span>
+          <button id="chat-clear" title="清空对话">清空</button>
+          <button id="chat-close" title="关闭">×</button>
+        </header>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+          <div id="chat-context">
+            <button id="ctx-sel" class="chip active">附带选区</button>
+            <button id="ctx-doc" class="chip">附带全文</button>
+          </div>
+          <textarea id="chat-input" placeholder="输入消息，⌘Enter 发送" rows="3"></textarea>
+          <div id="chat-actions">
+            <button id="chat-stop" hidden>停止</button>
+            <span class="spacer"></span>
+            <button id="chat-send" class="primary">发送 ⌘↵</button>
+          </div>
+        </div>
+      </aside>
     </main>
 
     <div id="ai-bar" hidden>

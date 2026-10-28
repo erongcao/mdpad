@@ -7,6 +7,7 @@ import { view, inTauri, newFile, openFile, openPath, writeCurrent, saveAs, setMo
 import { doExport, doPrint } from "./export";
 import { openSettings } from "./ai";
 import { runFormat } from "./format";
+import { toggleChat } from "./chat";
 
 async function dispatch(id: string) {
   if (id.startsWith("recent:")) {
@@ -37,6 +38,7 @@ async function dispatch(id: string) {
     case "view_editor": return setMode("editor");
     case "view_split": return setMode("split");
     case "view_preview": return setMode("preview");
+    case "chat_toggle": return toggleChat();
     case "undo": undo(view); return void view.focus();
     case "redo": redo(view); return void view.focus();
     case "find":
