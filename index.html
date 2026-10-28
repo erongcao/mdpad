@@ -98,7 +98,10 @@
         </label>
         <label>
           API Key
-          <input id="ai-api-key" type="password" placeholder="" spellcheck="false" autocomplete="off" />
+          <div class="key-row">
+            <input id="ai-api-key" type="password" placeholder="" spellcheck="false" autocomplete="off" />
+            <button id="ai-key-toggle" class="link-btn" type="button" title="显示或隐藏">显示</button>
+          </div>
           <span class="hint" id="ai-key-hint"></span>
           <button id="ai-key-clear" class="link-btn" hidden>清除已保存的 Key</button>
         </label>

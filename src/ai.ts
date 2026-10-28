@@ -351,13 +351,25 @@ async function fetchModels() {
     setSettingsStatus("先填接口地址");
     return;
   }
+  const keyInField = el<HTMLInputElement>("#ai-api-key").value;
   setSettingsStatus("拉取中…");
   try {
+    // 输入框里有新 key：先写进钥匙串，保证「拉取」用的就是眼前这串
+    if (keyInField) {
+      await invoke("ai_set_api_key", { provider: currentPresetKey(), key: keyInField });
+      el<HTMLElement>("#ai-key-clear").hidden = false;
+      el("#ai-key-hint").textContent = "已保存在 macOS 钥匙串，输入新值可更换";
+    }
     const models = await invoke<string[]>("ai_list_models", { baseUrl, provider: currentPresetKey() });
     fillModelList(models);
     setSettingsStatus(models.length ? `找到 ${models.length} 个模型` : "列表为空，请手填模型名");
   } catch (err) {
-    setSettingsStatus(`${String(err)}（可手填模型名）`);
+    const msg = String(err);
+    if (msg.includes("401")) {
+      setSettingsStatus("401 未授权：请确认 API Key 已填入上方输入框，且与所选服务商匹配");
+    } else {
+      setSettingsStatus(`${msg}（可手填模型名）`);
+    }
   }
 }
 
@@ -430,6 +442,12 @@ export function initAi() {
   el<HTMLSelectElement>("#ai-preset").addEventListener("change", () => {
     loadProviderFields(currentPresetKey());
     setSettingsStatus("");
+  });
+  el("#ai-key-toggle").addEventListener("click", () => {
+    const input = el<HTMLInputElement>("#ai-api-key");
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    el("#ai-key-toggle").textContent = showing ? "显示" : "隐藏";
   });
   el("#ai-key-clear").addEventListener("click", () => {
     const key = currentPresetKey();

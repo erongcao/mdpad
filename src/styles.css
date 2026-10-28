@@ -637,3 +637,15 @@ body {
 }
 #chat-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 #chat-actions button.primary:disabled { opacity: 0.5; }
+
+.key-row { display: flex; align-items: center; gap: 8px; }
+.key-row input { flex: 1; }
+.key-row .link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.key-row .link-btn:hover { text-decoration: underline; }
