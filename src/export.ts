@@ -47,7 +47,7 @@ async function checkPandoc(): Promise<boolean> {
   }
 }
 
-async function doExport(format: "docx" | "html") {
+export async function doExport(format: "docx" | "html") {
   if (!inTauri) {
     alert("导出功能需要在桌面应用里运行。");
     return;
@@ -79,7 +79,7 @@ async function doExport(format: "docx" | "html") {
   }
 }
 
-function doPrint() {
+export function doPrint() {
   renderPreview(); // 确保预览是最新的
   window.setTimeout(() => window.print(), 50);
 }
@@ -113,12 +113,6 @@ export function initExport() {
     const menu = el<HTMLElement>("#export-menu");
     if (!menu.hidden && !menu.contains(e.target as Node) && e.target !== el("#btn-export")) {
       toggleMenu(false);
-    }
-  });
-  window.addEventListener("keydown", (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "p") {
-      e.preventDefault();
-      doPrint();
     }
   });
 }

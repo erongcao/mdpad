@@ -6,7 +6,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Wry};
 
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
@@ -408,9 +409,221 @@ fn pandoc_export(
     Ok(output_path)
 }
 
+
+/* ---------------- 最近文件 ---------------- */
+
+fn recent_store_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("mdpad")
+        .join("recent-files.json")
+}
+
+fn read_recent() -> Vec<String> {
+    fs::read_to_string(recent_store_path())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn write_recent(list: &[String]) {
+    let p = recent_store_path();
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&p, serde_json::to_string_pretty(list).unwrap_or_default());
+}
+
+fn rebuild_recent_menu(app: &AppHandle) -> Result<(), String> {
+    let Some(menu) = app.menu() else { return Ok(()) };
+    let Some(tauri::menu::MenuItemKind::Submenu(sub)) = menu.get("recent-menu") else {
+        return Ok(());
+    };
+    for item in sub.items().map_err(|e| e.to_string())? {
+        sub.remove(&item).map_err(|e| e.to_string())?;
+    }
+    let list = read_recent();
+    if list.is_empty() {
+        let none = MenuItemBuilder::with_id("recent:none", "无最近文件")
+            .enabled(false)
+            .build(app)
+            .map_err(|e| e.to_string())?;
+        sub.append(&none).map_err(|e| e.to_string())?;
+    } else {
+        for (i, path) in list.iter().enumerate() {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            let item = MenuItemBuilder::with_id(format!("recent:{i}"), name)
+                .build(app)
+                .map_err(|e| e.to_string())?;
+            sub.append(&item).map_err(|e| e.to_string())?;
+        }
+        let sep = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+        sub.append(&sep).map_err(|e| e.to_string())?;
+        let clear = MenuItemBuilder::with_id("recent:clear", "清除列表")
+            .build(app)
+            .map_err(|e| e.to_string())?;
+        sub.append(&clear).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_recent_files() -> Vec<String> {
+    read_recent()
+}
+
+#[tauri::command]
+fn add_recent_file(app: AppHandle, path: String) {
+    let mut list = read_recent();
+    list.retain(|p| p != &path);
+    list.insert(0, path);
+    list.truncate(10);
+    write_recent(&list);
+    let _ = rebuild_recent_menu(&app);
+}
+
+#[tauri::command]
+fn clear_recent_files(app: AppHandle) {
+    write_recent(&[]);
+    let _ = rebuild_recent_menu(&app);
+}
+
+/* ---------------- 菜单 ---------------- */
+
+fn mi(
+    handle: &AppHandle,
+    id: &str,
+    label: &str,
+    accel: Option<&str>,
+) -> tauri::Result<tauri::menu::MenuItem<Wry>> {
+    let mut b = MenuItemBuilder::with_id(id, label);
+    if let Some(a) = accel {
+        b = b.accelerator(a);
+    }
+    b.build(handle)
+}
+
+fn build_menu(app: &AppHandle) -> tauri::Result<()> {
+    let app_menu = SubmenuBuilder::new(app, "mdpad")
+        .item(&PredefinedMenuItem::about(app, Some("关于 mdpad"), None)?)
+        .separator()
+        .item(&mi(app, "settings", "设置…", Some("CmdOrCtrl+,"))?)
+        .separator()
+        .item(&PredefinedMenuItem::services(app, Some("服务"))?)
+        .separator()
+        .item(&PredefinedMenuItem::hide(app, Some("隐藏 mdpad"))?)
+        .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
+        .item(&PredefinedMenuItem::show_all(app, Some("全部显示"))?)
+        .separator()
+        .item(&PredefinedMenuItem::quit(app, Some("退出 mdpad"))?)
+        .build()?;
+
+    let recent_sub = SubmenuBuilder::new(app, "打开最近")
+        .id("recent-menu")
+        .build()?;
+    let export_sub = SubmenuBuilder::new(app, "导出")
+        .item(&mi(app, "export_docx", "Word (.docx)", None)?)
+        .item(&mi(app, "export_html", "HTML 网页", None)?)
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "文件")
+        .item(&mi(app, "new", "新建", Some("CmdOrCtrl+N"))?)
+        .item(&mi(app, "open", "打开…", Some("CmdOrCtrl+O"))?)
+        .item(&recent_sub)
+        .separator()
+        .item(&mi(app, "save", "保存", Some("CmdOrCtrl+S"))?)
+        .item(&mi(app, "save_as", "另存为…", Some("Shift+CmdOrCtrl+S"))?)
+        .separator()
+        .item(&export_sub)
+        .item(&mi(app, "print", "打印 / 存为 PDF…", Some("CmdOrCtrl+P"))?)
+        .separator()
+        .item(&PredefinedMenuItem::close_window(app, Some("关闭窗口"))?)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&mi(app, "undo", "撤销", Some("CmdOrCtrl+Z"))?)
+        .item(&mi(app, "redo", "重做", Some("Shift+CmdOrCtrl+Z"))?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+        .item(&PredefinedMenuItem::copy(app, Some("拷贝"))?)
+        .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+        .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+        .separator()
+        .item(&mi(app, "find", "查找…", Some("CmdOrCtrl+F"))?)
+        .item(&mi(app, "replace", "替换…", Some("Alt+CmdOrCtrl+F"))?)
+        .build()?;
+
+    let format_menu = SubmenuBuilder::new(app, "格式")
+        .item(&mi(app, "fmt_h1", "标题 1", Some("Ctrl+CmdOrCtrl+1"))?)
+        .item(&mi(app, "fmt_h2", "标题 2", Some("Ctrl+CmdOrCtrl+2"))?)
+        .item(&mi(app, "fmt_h3", "标题 3", Some("Ctrl+CmdOrCtrl+3"))?)
+        .separator()
+        .item(&mi(app, "fmt_bold", "加粗", Some("CmdOrCtrl+B"))?)
+        .item(&mi(app, "fmt_italic", "斜体", Some("CmdOrCtrl+I"))?)
+        .item(&mi(app, "fmt_strike", "删除线", Some("Shift+CmdOrCtrl+X"))?)
+        .item(&mi(app, "fmt_code", "行内代码", Some("Shift+CmdOrCtrl+C"))?)
+        .separator()
+        .item(&mi(app, "fmt_quote", "引用块", Some("Shift+CmdOrCtrl+."))?)
+        .item(&mi(app, "fmt_codeblock", "代码块", Some("Alt+CmdOrCtrl+C"))?)
+        .item(&mi(app, "fmt_hr", "分隔线", None)?)
+        .separator()
+        .item(&mi(app, "fmt_link", "链接…", Some("CmdOrCtrl+K"))?)
+        .item(&mi(app, "fmt_image", "图片", None)?)
+        .separator()
+        .item(&mi(app, "fmt_ul", "无序列表", Some("Shift+CmdOrCtrl+7"))?)
+        .item(&mi(app, "fmt_ol", "有序列表", Some("Shift+CmdOrCtrl+8"))?)
+        .item(&mi(app, "fmt_todo", "任务列表", Some("Shift+CmdOrCtrl+9"))?)
+        .separator()
+        .item(&mi(app, "fmt_table", "表格", None)?)
+        .item(&mi(app, "fmt_footnote", "脚注", None)?)
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "视图")
+        .item(&mi(app, "view_editor", "源码", Some("CmdOrCtrl+1"))?)
+        .item(&mi(app, "view_split", "分栏", Some("CmdOrCtrl+2"))?)
+        .item(&mi(app, "view_preview", "预览", Some("CmdOrCtrl+3"))?)
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "窗口")
+        .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
+        .item(&PredefinedMenuItem::maximize(app, Some("缩放"))?)
+        .build()?;
+
+    let help_menu = SubmenuBuilder::new(app, "帮助")
+        .item(&mi(app, "help_repo", "GitHub 仓库", None)?)
+        .item(&mi(app, "help_issue", "反馈问题…", None)?)
+        .build()?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &format_menu,
+            &view_menu,
+            &window_menu,
+            &help_menu,
+        ])
+        .build()?;
+    app.set_menu(menu)?;
+
+    app.on_menu_event(|app, event| {
+        let _ = app.emit("menu-event", event.id().as_ref());
+    });
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            build_menu(app.handle())?;
+            rebuild_recent_menu(app.handle()).map_err(|e| e.to_string())?;
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -426,6 +639,9 @@ pub fn run() {
             ai_delete_api_key,
             pandoc_check,
             pandoc_export,
+            get_recent_files,
+            add_recent_file,
+            clear_recent_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

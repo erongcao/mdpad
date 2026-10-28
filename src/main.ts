@@ -21,6 +21,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { initAi } from "./ai";
 import { initExport } from "./export";
+import { initMenu } from "./menu";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -179,7 +180,7 @@ function updateTitle() {
   else document.title = title;
 }
 
-function setMode(next: typeof mode) {
+export function setMode(next: typeof mode) {
   mode = next;
   workspace.dataset.mode = next;
   document.querySelectorAll<HTMLButtonElement>("#view-modes button").forEach((b) => {
@@ -205,24 +206,34 @@ function setDoc(text: string, path: string | null) {
   updateMeta();
 }
 
-async function openFile() {
-  if (!inTauri) return alert("文件操作需要在桌面应用里运行。");
+export async function openPath(path: string) {
   if (dirty && !confirm("当前文档还没保存，继续打开会丢失修改。继续？")) return;
+  try {
+    const text = await invoke<string>("read_text_file", { path });
+    setDoc(text, path);
+    void invoke("add_recent_file", { path });
+  } catch (err) {
+    alert(String(err));
+  }
+}
+
+export async function openFile() {
+  if (!inTauri) return alert("文件操作需要在桌面应用里运行。");
   const picked = await open({
     multiple: false,
     directory: false,
     filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "txt"] }],
   });
   if (typeof picked !== "string") return;
-  try {
-    const text = await invoke<string>("read_text_file", { path: picked });
-    setDoc(text, picked);
-  } catch (err) {
-    alert(String(err));
-  }
+  await openPath(picked);
 }
 
-async function saveAs(): Promise<boolean> {
+export function newFile() {
+  if (dirty && !confirm("当前文档还没保存，新建会丢失修改。继续？")) return;
+  setDoc("", null);
+}
+
+export async function saveAs(): Promise<boolean> {
   if (!inTauri) {
     alert("文件操作需要在桌面应用里运行。");
     return false;
@@ -236,7 +247,7 @@ async function saveAs(): Promise<boolean> {
   return writeCurrent();
 }
 
-async function writeCurrent(): Promise<boolean> {
+export async function writeCurrent(): Promise<boolean> {
   if (!currentPath) return saveAs();
   try {
     await invoke("write_text_file", {
@@ -245,6 +256,7 @@ async function writeCurrent(): Promise<boolean> {
     });
     dirty = false;
     updateTitle();
+    void invoke("add_recent_file", { path: currentPath });
     return true;
   } catch (err) {
     alert(String(err));
@@ -259,20 +271,6 @@ document.querySelector("#btn-save")!.addEventListener("click", () => void writeC
 
 document.querySelectorAll<HTMLButtonElement>("#view-modes button").forEach((btn) => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode as typeof mode));
-});
-
-window.addEventListener("keydown", (e) => {
-  const meta = e.metaKey || e.ctrlKey;
-  if (!meta) return;
-  const key = e.key.toLowerCase();
-  if (key === "o") {
-    e.preventDefault();
-    void openFile();
-  } else if (key === "s") {
-    e.preventDefault();
-    if (e.shiftKey) void saveAs();
-    else void writeCurrent();
-  }
 });
 
 if (win) {
@@ -341,3 +339,4 @@ updateMeta();
 updateTitle();
 initAi();
 initExport();
+initMenu();

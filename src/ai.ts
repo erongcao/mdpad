@@ -330,7 +330,7 @@ function loadProviderFields(key: string) {
   el("#ai-active-hint").textContent = isActive ? "当前使用" : "";
 }
 
-function openSettings() {
+export function openSettings() {
   void (async () => {
     el<HTMLElement>("#ai-settings-overlay").hidden = false;
     setSettingsStatus("");
