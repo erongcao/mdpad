@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1024px; height: 1024px; background: transparent; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3c3c43"/>
+      <stop offset="1" stop-color="#1b1b1f"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="1" stop-color="#e8e0d0"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect x="92" y="92" width="840" height="840" rx="188" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="92.5" y="92.5" width="839" height="839" rx="187.5" fill="none" stroke="url(#edge)" stroke-width="3"/>
+
+  <g fill="url(#ink)">
+    <text x="330" y="620" font-family="SF Pro Rounded, -apple-system, Helvetica Neue, sans-serif"
+          font-size="360" font-weight="700" text-anchor="middle" letter-spacing="-14">M</text>
+  </g>
+
+  <g stroke="url(#ink)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M 560 400 L 560 620"/>
+    <path d="M 505 565 L 560 625 L 615 565"/>
+  </g>
+
+  <g fill="url(#ink)" opacity="0.55">
+    <rect x="300" y="700" width="424" height="18" rx="9"/>
+    <rect x="300" y="752" width="300" height="18" rx="9"/>
+  </g>
+</svg>
+</body>
+</html>

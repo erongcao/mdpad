@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>mdpad</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <header class="toolbar" data-tauri-drag-region>
+      <div class="group" data-tauri-drag-region>
+        <button id="btn-open" title="打开 ⌘O">打开</button>
+        <button id="btn-save" title="保存 ⌘S">保存</button>
+      </div>
+      <div class="group segmented" id="view-modes">
+        <button data-mode="editor" class="active">源码</button>
+        <button data-mode="split">分栏</button>
+        <button data-mode="preview">预览</button>
+      </div>
+      <div class="spacer" data-tauri-drag-region></div>
+      <div class="group export-group">
+        <button id="btn-export" title="导出文档">导出</button>
+        <div id="export-menu" hidden>
+          <button data-export="docx">Word (.docx)</button>
+          <button data-export="html">HTML 网页</button>
+          <button data-export="print">打印 / 存为 PDF…</button>
+        </div>
+      </div>
+      <button id="btn-ai-settings" title="AI 设置">AI</button>
+      <div class="meta" id="meta">—</div>
+    </header>
+
+    <main class="workspace" id="workspace">
+      <section class="pane editor-pane">
+        <div id="editor"></div>
+      </section>
+      <div class="divider" id="divider"></div>
+      <section class="pane preview-pane">
+        <article class="markdown-body" id="preview"></article>
+      </section>
+    </main>
+
+    <div id="ai-bar" hidden>
+      <button data-action="expand">扩写</button>
+      <button data-action="summarize">总结</button>
+      <button data-action="polish">润色</button>
+    </div>
+
+    <aside id="ai-drawer" hidden>
+      <header>
+        <span id="ai-drawer-title">AI</span>
+        <span class="spacer"></span>
+        <span id="ai-drawer-status"></span>
+        <button id="ai-stop" hidden>停止</button>
+        <button id="ai-close" title="关闭">×</button>
+      </header>
+      <div id="ai-output" class="markdown-body"></div>
+      <footer>
+        <button id="ai-replace">替换选区</button>
+        <button id="ai-insert-after">插入到选区后</button>
+        <button id="ai-copy">复制</button>
+      </footer>
+    </aside>
+
+    <div id="ai-settings-overlay" hidden>
+      <div id="ai-settings">
+        <h2>AI 设置</h2>
+        <label>
+          服务商 <span class="hint" id="ai-active-hint"></span>
+          <select id="ai-preset">
+            <option value="ollama">Ollama（本地）</option>
+            <option value="lmstudio">LM Studio（本地）</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="zhipu">智谱 GLM</option>
+            <option value="minimax">MiniMax</option>
+            <option value="kimi">Kimi（月之暗面）</option>
+            <option value="dashscope">通义千问（百炼）</option>
+            <option value="volcengine">豆包（火山方舟）</option>
+            <option value="openai">OpenAI</option>
+            <option value="custom">自定义 OpenAI 兼容端点</option>
+          </select>
+        </label>
+        <label>
+          接口地址
+          <input id="ai-base-url" placeholder="http://localhost:11434/v1" spellcheck="false" />
+        </label>
+        <label>
+          API Key
+          <input id="ai-api-key" type="password" placeholder="" spellcheck="false" autocomplete="off" />
+          <span class="hint" id="ai-key-hint"></span>
+          <button id="ai-key-clear" class="link-btn" hidden>清除已保存的 Key</button>
+        </label>
+        <label>
+          模型
+          <input id="ai-model" list="ai-model-list" placeholder="qwen3.8:27b-mlx" spellcheck="false" />
+          <datalist id="ai-model-list"></datalist>
+          <select id="ai-model-select" hidden></select>
+          <span class="hint" id="ai-model-hint"></span>
+        </label>
+        <div class="row">
+          <button id="ai-fetch-models">拉取模型列表</button>
+          <span id="ai-settings-status"></span>
+        </div>
+        <div class="row right">
+          <button id="ai-settings-cancel">取消</button>
+          <button id="ai-settings-save" class="primary">保存并使用</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty-hint" id="empty-hint" hidden>拖一个 .md 文件进来</div>
+  </body>
+</html>

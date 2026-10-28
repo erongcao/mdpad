@@ -1,0 +1,90 @@
+# mdpad
+
+一个 macOS 上的 Markdown 写作工具：CodeMirror 6 编辑器 + AI 辅助写作 + pandoc 导出，原生外壳只有约 6 MB。
+
+## 功能
+
+### 编辑
+
+- CodeMirror 6 内核，增量解析，大文件流畅编辑
+- 源码 / 分栏 / 预览三种视图，实时渲染（markdown-it）
+- 拖拽打开 .md 文件，⌘O 打开，⌘S 保存，⇧⌘S 另存为，⌘F 查找
+- 字数统计（中文字符 + 西文单词分别计），深浅色跟随系统
+
+### AI 辅助写作
+
+选中一段文字，浮出小条即可操作：
+
+- 扩写：保持原意扩充到两三倍
+- 总结：三到五句话概括要点
+- 润色：修正语病、让表达更流畅
+
+结果流式显示在底部抽屉，确认后可选「替换选区」或「插入到选区后」——AI 不会直接改动你的原文。支持推理模型的思考过程展示（qwen、DeepSeek-R1 等）。
+
+支持的服务商（一套 OpenAI 兼容协议全覆盖）：
+
+| 类型 | 服务商 |
+| --- | --- |
+| 本地 | Ollama、LM Studio |
+| 云端 | DeepSeek、智谱 GLM、MiniMax、Kimi（月之暗面）、通义千问（百炼）、豆包（火山方舟）、OpenAI |
+| 其他 | 任何 OpenAI 兼容端点（自定义） |
+
+### 导出
+
+- Word (.docx)：pandoc 转换，数学公式转 Word 原生 OMML 格式（可继续编辑），表格为真 Word 表格
+- HTML：单文件导出，样式内联、图片内嵌，发哪儿都能看
+- PDF：⌘P 系统打印，打印视图只含正文
+
+### 隐私
+
+- 文档完全本地，AI 请求只发你选中的那一段文字
+- API Key 保存在 macOS 钥匙串，不落任何明文文件
+- 配置存于 ~/Library/Application Support/mdpad/ai-config.json（只含地址和模型名）
+
+## 安装
+
+从 Releases 下载 mdpad_aarch64.dmg，拖进「应用程序」。
+
+未签名的应用首次打开会被 Gatekeeper 拦：右键 → 打开，或在 系统设置 → 隐私与安全性 里允许。
+
+## 使用
+
+### 配置 AI
+
+工具栏右侧「AI」按钮打开设置：
+
+1. 选服务商（本地 Ollama 默认已填好，云端需要填 API Key）
+2. 点「拉取模型列表」拿到真实模型清单，下拉选择；也可以手填
+3. 「保存并使用」——每个服务商的配置分开保存，切换不用重输
+
+云端 API Key 申请入口：设置面板里每个服务商名下有提示。
+
+### 配置导出
+
+docx / html 导出依赖 pandoc：「brew install pandoc」。程序会自动在常见位置查找（/opt/homebrew/bin、/usr/local/bin），找不到时导出按钮会给出安装提示。
+
+## 从源码构建
+
+需要 Rust 工具链和 Node.js：
+
+```bash
+npm install
+npm run tauri dev    # 开发模式（热更新）
+npm run tauri build  # 打包 release，产物在 src-tauri/target/release/bundle/
+```
+
+## 技术栈
+
+- 外壳：Tauri 2（Rust + WKWebView），不用 Electron，无 Node、无 Chromium 运行时
+- 编辑器：CodeMirror 6
+- 渲染：markdown-it
+- AI：reqwest 直连 OpenAI 兼容端点，SSE 流式解析（Rust 侧，前端只收事件）
+- 密钥：keyring crate → macOS Keychain
+
+## 致谢
+
+AI 写作台的产品形态参考了 MDEditor（github.com/Ldxs001/maby_tool）与其衍生项目墨匠 MDWright（github.com/zhjx19/MDWright）——仅借鉴思路，本项目代码为独立实现。
+
+## License
+
+GNU AGPL-3.0-or-later。你可以自由使用、修改、再分发；修改后再分发（包括以网络服务形式提供）必须以相同协议开源。
