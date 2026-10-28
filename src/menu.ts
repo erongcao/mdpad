@@ -43,6 +43,7 @@ async function dispatch(id: string) {
     case "redo": redo(view); return void view.focus();
     case "find":
     case "replace": openSearchPanel(view); return void view.focus();
+    case "open_log": return void invoke("open_log");
     case "help_repo": return void openUrl("https://github.com/erongcao/mdpad");
     case "help_issue": return void openUrl("https://github.com/erongcao/mdpad/issues/new");
   }

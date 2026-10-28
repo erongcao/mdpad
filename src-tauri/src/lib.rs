@@ -292,9 +292,16 @@ fn ai_has_api_key(provider: String) -> bool {
 
 #[tauri::command]
 fn ai_set_api_key(provider: String, key: String) -> Result<(), String> {
-    keychain_entry(&provider)?
-        .set_password(&key)
-        .map_err(|e| format!("写入钥匙串失败：{e}"))
+    let trimmed = key.trim().to_string();
+    let r = keychain_entry(&provider)?
+        .set_password(&trimmed)
+        .map_err(|e| format!("写入钥匙串失败：{e}"));
+    log_line(&format!(
+        "set_api_key: provider={provider} key_len={} 结果={}",
+        trimmed.len(),
+        if r.is_ok() { "ok" } else { "失败" }
+    ));
+    r
 }
 
 #[tauri::command]
@@ -404,11 +411,52 @@ fn pandoc_export(
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let snippet: String = stderr.chars().take(300).collect();
+        log_line(&format!("pandoc 导出失败: format={format} err={snippet}"));
         return Err(format!("pandoc 导出失败：{snippet}"));
     }
+    log_line(&format!("pandoc 导出成功: format={format} -> {output_path}"));
     Ok(output_path)
 }
 
+
+
+/* ---------------- 日志 ---------------- */
+
+fn log_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("mdpad")
+        .join("mdpad.log")
+}
+
+fn log_line(msg: &str) {
+    let p = log_path();
+    if let Some(parent) = p.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    // 超过 1MB 就截断重来，日志不膨胀
+    if let Ok(meta) = fs::metadata(&p) {
+        if meta.len() > 1_000_000 {
+            let _ = fs::remove_file(&p);
+        }
+    }
+    let ts = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S").to_string();
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&p) {
+        use std::io::Write;
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
+#[tauri::command]
+fn open_log() -> Result<(), String> {
+    let p = log_path();
+    if !p.exists() {
+        fs::write(&p, "").map_err(|e| e.to_string())?;
+    }
+    tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| e.to_string())
+}
 
 /* ---------------- 最近文件 ---------------- */
 
@@ -596,6 +644,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let help_menu = SubmenuBuilder::new(app, "帮助")
         .item(&mi(app, "help_repo", "GitHub 仓库", None)?)
         .item(&mi(app, "help_issue", "反馈问题…", None)?)
+        .item(&mi(app, "open_log", "查看日志", None)?)
         .build()?;
 
     let menu = MenuBuilder::new(app)
@@ -644,6 +693,7 @@ pub fn run() {
             get_recent_files,
             add_recent_file,
             clear_recent_files,
+            open_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

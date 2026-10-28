@@ -436,6 +436,7 @@ export function initAi() {
   el("#ai-settings-cancel").addEventListener("click", closeSettings);
   el("#ai-settings-save").addEventListener("click", () => void saveSettings());
   el("#ai-fetch-models").addEventListener("click", () => void fetchModels());
+  el("#ai-view-log").addEventListener("click", () => { if (inTauri) void invoke("open_log"); });
   el<HTMLElement>("#ai-settings-overlay").addEventListener("mousedown", (e) => {
     if (e.target === e.currentTarget) closeSettings();
   });
