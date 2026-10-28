@@ -133,24 +133,40 @@ fn ai_set_config(mut config: AiConfig) -> Result<(), String> {
 async fn ai_list_models(base_url: String, provider: String) -> Result<Vec<String>, String> {
     let api_key = keychain_get(&provider);
     let url = format!("{}/models", base_url.trim_end_matches('/'));
+    log_line(&format!(
+        "list_models 请求: provider={provider} url={url} key_len={}",
+        api_key.len()
+    ));
     let client = reqwest::Client::new();
     let mut req = client.get(&url);
     if !api_key.is_empty() {
         req = req.bearer_auth(&api_key);
     }
-    let resp = req.send().await.map_err(|e| format!("连接失败：{e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            log_line(&format!("list_models 连接失败: {e}"));
+            return Err(format!("连接失败：{e}"));
+        }
+    };
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        let snippet: String = body.chars().take(200).collect();
+        log_line(&format!("list_models 失败: HTTP {status} body={snippet}"));
+        return Err(format!("HTTP {status}：{snippet}"));
     }
     let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(json["data"]
+    let models: Vec<String> = json["data"]
         .as_array()
         .map(|arr| {
             arr.iter()
                 .filter_map(|m| m["id"].as_str().map(String::from))
                 .collect()
         })
-        .unwrap_or_default())
+        .unwrap_or_default();
+    log_line(&format!("list_models 成功: {} 个模型", models.len()));
+    Ok(models)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -185,9 +201,17 @@ async fn ai_chat_stream(
     let cancel = Arc::new(AtomicBool::new(false));
     CANCELS.lock().unwrap().insert(id.clone(), cancel.clone());
     let api_key = keychain_get(&provider);
+    log_line(&format!(
+        "chat 请求: provider={provider} model={model} key_len={} base={base_url}",
+        api_key.len()
+    ));
 
     let result = run_stream(&app, &id, &base_url, &api_key, &model, messages, &cancel).await;
 
+    match &result {
+        Ok(()) => log_line("chat 完成"),
+        Err(e) => log_line(&format!("chat 失败: {e}")),
+    }
     CANCELS.lock().unwrap().remove(&id);
     result
 }
@@ -450,6 +474,11 @@ fn log_line(msg: &str) {
 }
 
 #[tauri::command]
+fn log_frontend(msg: String) {
+    log_line(&format!("前端: {msg}"));
+}
+
+#[tauri::command]
 fn open_log() -> Result<(), String> {
     let p = log_path();
     if !p.exists() {
@@ -694,6 +723,7 @@ pub fn run() {
             add_recent_file,
             clear_recent_files,
             open_log,
+            log_frontend,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -246,6 +246,7 @@ async function startAction(action: ActionKey) {
     job.running = false;
     el("#ai-stop").hidden = true;
     setStatus(`出错：${String(err)}`);
+    void invoke("log_frontend", { msg: "startAction 出错: " + String(err) });
   }
 }
 
@@ -365,6 +366,7 @@ async function fetchModels() {
     setSettingsStatus(models.length ? `找到 ${models.length} 个模型` : "列表为空，请手填模型名");
   } catch (err) {
     const msg = String(err);
+    if (inTauri) void invoke("log_frontend", { msg: "fetchModels 出错: " + msg });
     if (msg.includes("401")) {
       setSettingsStatus("401 未授权：请确认 API Key 已填入上方输入框，且与所选服务商匹配");
     } else {

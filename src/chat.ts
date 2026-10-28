@@ -177,6 +177,7 @@ async function send() {
     streaming = false;
     el("#chat-stop").hidden = true;
     el<HTMLButtonElement>("#chat-send").disabled = false;
+    void invoke("log_frontend", { msg: "chat send 出错: " + String(err) });
     const last = messages[messages.length - 1];
     if (last && last.role === "assistant" && !last.content) {
       last.content = "出错：" + String(err);
