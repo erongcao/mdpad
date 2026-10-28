@@ -22,6 +22,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { initAi } from "./ai";
 import { initMenu } from "./menu";
 import { initChat } from "./chat";
+import { tableKeymap, initTables } from "./tables";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -128,6 +129,7 @@ export const view = new EditorView({
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       placeholder("开始写点什么…"),
+      tableKeymap,
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown(),
       highlightCompartment.of(syntaxHighlighting(darkQuery.matches ? darkHighlight : lightHighlight)),
@@ -337,3 +339,4 @@ updateTitle();
 initAi();
 initMenu();
 initChat();
+initTables();

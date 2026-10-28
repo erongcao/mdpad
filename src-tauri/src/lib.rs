@@ -678,6 +678,24 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&mi(app, "replace", "替换…", Some("Alt+CmdOrCtrl+F"))?)
         .build()?;
 
+    let table_sub = SubmenuBuilder::new(app, "表格")
+        .item(&mi(app, "tbl_insert", "插入表格…", Some("Shift+CmdOrCtrl+T"))?)
+        .separator()
+        .item(&mi(app, "tbl_row_above", "上方插入行", None)?)
+        .item(&mi(app, "tbl_row_below", "下方插入行", None)?)
+        .item(&mi(app, "tbl_col_left", "左侧插入列", None)?)
+        .item(&mi(app, "tbl_col_right", "右侧插入列", None)?)
+        .separator()
+        .item(&mi(app, "tbl_row_del", "删除当前行", None)?)
+        .item(&mi(app, "tbl_col_del", "删除当前列", None)?)
+        .separator()
+        .item(&mi(app, "tbl_align_left", "本列左对齐", None)?)
+        .item(&mi(app, "tbl_align_center", "本列居中", None)?)
+        .item(&mi(app, "tbl_align_right", "本列右对齐", None)?)
+        .separator()
+        .item(&mi(app, "tbl_format", "格式化表格", None)?)
+        .build()?;
+
     let format_menu = SubmenuBuilder::new(app, "格式")
         .item(&mi(app, "fmt_h1", "标题 1", Some("Ctrl+CmdOrCtrl+1"))?)
         .item(&mi(app, "fmt_h2", "标题 2", Some("Ctrl+CmdOrCtrl+2"))?)
@@ -699,7 +717,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&mi(app, "fmt_ol", "有序列表", Some("Shift+CmdOrCtrl+8"))?)
         .item(&mi(app, "fmt_todo", "任务列表", Some("Shift+CmdOrCtrl+9"))?)
         .separator()
-        .item(&mi(app, "fmt_table", "表格", None)?)
+        .item(&table_sub)
         .item(&mi(app, "fmt_footnote", "脚注", None)?)
         .build()?;
 

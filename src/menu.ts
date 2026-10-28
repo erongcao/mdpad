@@ -8,6 +8,7 @@ import { doExport, doPrint } from "./export";
 import { openSettings } from "./ai";
 import { runFormat } from "./format";
 import { toggleChat } from "./chat";
+import { runTable } from "./tables";
 
 async function dispatch(id: string) {
   if (id.startsWith("recent:")) {
@@ -20,6 +21,10 @@ async function dispatch(id: string) {
     const list = await invoke<string[]>("get_recent_files");
     const path = list[Number(n)];
     if (path) await openPath(path);
+    return;
+  }
+  if (id.startsWith("tbl_")) {
+    runTable(id);
     return;
   }
   if (id.startsWith("fmt_")) {

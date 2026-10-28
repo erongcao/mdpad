@@ -52,6 +52,32 @@
       </aside>
     </main>
 
+    <div id="tbl-bar" hidden>
+      <button data-tbl="tbl_row_above" title="上方插入行">+行↑</button>
+      <button data-tbl="tbl_row_below" title="下方插入行">+行↓</button>
+      <button data-tbl="tbl_col_left" title="左侧插入列">+列←</button>
+      <button data-tbl="tbl_col_right" title="右侧插入列">+列→</button>
+      <button data-tbl="tbl_row_del" title="删除当前行">−行</button>
+      <button data-tbl="tbl_col_del" title="删除当前列">−列</button>
+      <button data-tbl="tbl_format" title="格式化对齐">对齐</button>
+    </div>
+
+    <div id="tbl-dialog-overlay" hidden>
+      <div id="tbl-dialog">
+        <h2>插入表格</h2>
+        <label>列数
+          <input id="tbl-cols" type="number" min="1" max="12" value="2" />
+        </label>
+        <label>数据行数（不含表头）
+          <input id="tbl-rows" type="number" min="1" max="50" value="2" />
+        </label>
+        <div class="row right">
+          <button id="tbl-cancel">取消</button>
+          <button id="tbl-ok" class="primary">插入</button>
+        </div>
+      </div>
+    </div>
+
     <div id="ai-bar" hidden>
       <button data-action="expand">扩写</button>
       <button data-action="summarize">总结</button>
