@@ -55,7 +55,7 @@ export async function doExport(format: "docx" | "html") {
   if (!(await checkPandoc())) return;
 
   const picked = await save({
-    defaultPath: `${docBaseName()}.${format}`,
+    defaultPath: docBaseName() + "." + format,
     filters: [
       format === "docx"
         ? { name: "Word 文档", extensions: ["docx"] }
@@ -72,7 +72,7 @@ export async function doExport(format: "docx" | "html") {
       outputPath: picked,
       docDir: docDir(),
     });
-    showStatus(`已导出：${path.split("/").pop()}`);
+    showStatus("已导出：" + path.split("/").pop());
   } catch (err) {
     showStatus("导出失败", 4000);
     alert(String(err));
@@ -80,39 +80,6 @@ export async function doExport(format: "docx" | "html") {
 }
 
 export function doPrint() {
-  renderPreview(); // 确保预览是最新的
+  renderPreview();
   window.setTimeout(() => window.print(), 50);
-}
-
-function toggleMenu(show?: boolean) {
-  const menu = el<HTMLElement>("#export-menu");
-  const next = show ?? menu.hidden;
-  menu.hidden = !next;
-  if (next) {
-    const btn = el<HTMLElement>("#btn-export");
-    const rect = btn.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
-  }
-}
-
-export function initExport() {
-  el("#btn-export").addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleMenu();
-  });
-  document.querySelectorAll<HTMLButtonElement>("#export-menu button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      toggleMenu(false);
-      const kind = btn.dataset.export;
-      if (kind === "docx" || kind === "html") void doExport(kind);
-      else if (kind === "print") doPrint();
-    });
-  });
-  window.addEventListener("mousedown", (e) => {
-    const menu = el<HTMLElement>("#export-menu");
-    if (!menu.hidden && !menu.contains(e.target as Node) && e.target !== el("#btn-export")) {
-      toggleMenu(false);
-    }
-  });
 }

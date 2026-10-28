@@ -10,24 +10,12 @@
 
   <body>
     <header class="toolbar" data-tauri-drag-region>
-      <div class="group" data-tauri-drag-region>
-        <button id="btn-open" title="打开 ⌘O">打开</button>
-        <button id="btn-save" title="保存 ⌘S">保存</button>
-      </div>
       <div class="group segmented" id="view-modes">
         <button data-mode="editor" class="active">源码</button>
         <button data-mode="split">分栏</button>
         <button data-mode="preview">预览</button>
       </div>
       <div class="spacer" data-tauri-drag-region></div>
-      <div class="group export-group">
-        <button id="btn-export" title="导出文档">导出</button>
-        <div id="export-menu" hidden>
-          <button data-export="docx">Word (.docx)</button>
-          <button data-export="html">HTML 网页</button>
-          <button data-export="print">打印 / 存为 PDF…</button>
-        </div>
-      </div>
       <button id="btn-ai-settings" title="AI 设置">AI</button>
       <div class="meta" id="meta">—</div>
     </header>

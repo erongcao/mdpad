@@ -20,7 +20,6 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { initAi } from "./ai";
-import { initExport } from "./export";
 import { initMenu } from "./menu";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
@@ -266,9 +265,6 @@ export async function writeCurrent(): Promise<boolean> {
 
 /* ---------------- 事件 ---------------- */
 
-document.querySelector("#btn-open")!.addEventListener("click", openFile);
-document.querySelector("#btn-save")!.addEventListener("click", () => void writeCurrent());
-
 document.querySelectorAll<HTMLButtonElement>("#view-modes button").forEach((btn) => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode as typeof mode));
 });
@@ -338,5 +334,4 @@ setMode("split");
 updateMeta();
 updateTitle();
 initAi();
-initExport();
 initMenu();
