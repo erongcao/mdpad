@@ -102,11 +102,9 @@ fn ai_get_config() -> AiConfig {
     let mut migrated = false;
     for (name, provider) in cfg.providers.iter_mut() {
         if !provider.api_key.is_empty() {
-            if let Ok(entry) = keychain_entry(name) {
-                if entry.set_password(&provider.api_key).is_ok() {
-                    provider.api_key.clear();
-                    migrated = true;
-                }
+            if ai_set_api_key(name.clone(), provider.api_key.clone()).is_ok() {
+                provider.api_key.clear();
+                migrated = true;
             }
         }
     }
@@ -296,17 +294,41 @@ async fn run_stream(
 
 
 
-/* ---------------- 钥匙串（API Key 只进不出） ---------------- */
+/* ---------------- 钥匙串（走 security CLI，读写同一条路径，无授权弹窗） ---------------- */
 
-fn keychain_entry(provider: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new("com.yirongcao.mdpad", &format!("ai-api-key-{provider}"))
-        .map_err(|e| format!("钥匙串不可用：{e}"))
+const KEYCHAIN_SERVICE: &str = "com.yirongcao.mdpad";
+
+fn keychain_account(provider: &str) -> String {
+    format!("ai-api-key-{provider}")
 }
 
 fn keychain_get(provider: &str) -> String {
-    keychain_entry(provider)
-        .and_then(|e| e.get_password().map_err(|e| e.to_string()))
-        .unwrap_or_default()
+    let out = std::process::Command::new("security")
+        .args([
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            &keychain_account(provider),
+            "-w",
+        ])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .trim_end_matches(['\r', '\n'])
+            .to_string(),
+        Ok(o) => {
+            log_line(&format!(
+                "keychain 读取失败 provider={provider}: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            ));
+            String::new()
+        }
+        Err(e) => {
+            log_line(&format!("security CLI 调用失败: {e}"));
+            String::new()
+        }
+    }
 }
 
 #[tauri::command]
@@ -317,24 +339,48 @@ fn ai_has_api_key(provider: String) -> bool {
 #[tauri::command]
 fn ai_set_api_key(provider: String, key: String) -> Result<(), String> {
     let trimmed = key.trim().to_string();
-    let r = keychain_entry(&provider)?
-        .set_password(&trimmed)
-        .map_err(|e| format!("写入钥匙串失败：{e}"));
-    log_line(&format!(
-        "set_api_key: provider={provider} key_len={} 结果={}",
-        trimmed.len(),
-        if r.is_ok() { "ok" } else { "失败" }
-    ));
-    r
+    let out = std::process::Command::new("security")
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            &keychain_account(&provider),
+            "-w",
+            &trimmed,
+        ])
+        .output()
+        .map_err(|e| format!("调用 security 失败：{e}"))?;
+    if out.status.success() {
+        log_line(&format!(
+            "set_api_key: provider={provider} key_len={} ok",
+            trimmed.len()
+        ));
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        log_line(&format!("set_api_key: provider={provider} 失败: {err}"));
+        Err(format!("写入钥匙串失败：{err}"))
+    }
 }
 
 #[tauri::command]
 fn ai_delete_api_key(provider: String) -> Result<(), String> {
-    match keychain_entry(&provider)?.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("删除失败：{e}")),
+    let out = std::process::Command::new("security")
+        .args([
+            "delete-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            &keychain_account(&provider),
+        ])
+        .output()
+        .map_err(|e| format!("调用 security 失败：{e}"))?;
+    if out.status.success() {
+        log_line(&format!("delete_api_key: provider={provider} ok"));
     }
+    Ok(())
 }
 
 /* ---------------- Pandoc 导出 ---------------- */
