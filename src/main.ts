@@ -27,6 +27,8 @@ import { tableKeymap, initTables } from "./tables";
 import { focusCompartment, initialFocusExtension } from "./focus";
 import { attachRunButtons, initRunner } from "./runner";
 import { completionExtension, initCompletionToggle } from "./complete";
+import { scheduleAutosave, clearAutosave, initAutosaveRecovery } from "./autosave";
+import { scheduleAutoUpdateCheck } from "./updater";
 
 export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -152,6 +154,7 @@ export const view = new EditorView({
           dirty = true;
           updateTitle();
           schedulePreview();
+          scheduleAutosave();
         }
         if (u.docChanged || u.selectionSet) updateMeta();
       }),
@@ -209,7 +212,7 @@ export function setMode(next: typeof mode) {
 
 /* ---------------- 文件操作 ---------------- */
 
-function setDoc(text: string, path: string | null) {
+export function setDoc(text: string, path: string | null) {
   currentPath = path;
   dirty = false;
   view.dispatch({
@@ -224,7 +227,10 @@ function setDoc(text: string, path: string | null) {
 }
 
 export async function openPath(path: string) {
-  if (dirty && !confirm("当前文档还没保存，继续打开会丢失修改。继续？")) return;
+  if (dirty) {
+    if (!confirm("当前文档还没保存，继续打开会丢失修改。继续？")) return;
+    clearAutosave();
+  }
   try {
     const text = await invoke<string>("read_text_file", { path });
     setDoc(text, path);
@@ -246,7 +252,10 @@ export async function openFile() {
 }
 
 export function newFile() {
-  if (dirty && !confirm("当前文档还没保存，新建会丢失修改。继续？")) return;
+  if (dirty) {
+    if (!confirm("当前文档还没保存，新建会丢失修改。继续？")) return;
+    clearAutosave();
+  }
   setDoc("", null);
 }
 
@@ -273,6 +282,7 @@ export async function writeCurrent(): Promise<boolean> {
     });
     dirty = false;
     updateTitle();
+    clearAutosave();
     void invoke("add_recent_file", { path: currentPath });
     return true;
   } catch (err) {
@@ -305,7 +315,10 @@ if (inTauri) {
     if (event.payload.type !== "drop") return;
     const path = event.payload.paths.find((p) => /\.(md|markdown|mdown|txt)$/i.test(p));
     if (!path) return;
-    if (dirty && !confirm("当前文档还没保存，继续会丢失修改。继续？")) return;
+    if (dirty) {
+      if (!confirm("当前文档还没保存，继续会丢失修改。继续？")) return;
+      clearAutosave();
+    }
     try {
       const text = await invoke<string>("read_text_file", { path });
       setDoc(text, path);
@@ -351,6 +364,16 @@ export function getCurrentPath(): string | null {
   return currentPath;
 }
 
+export function isDirty(): boolean {
+  return dirty;
+}
+
+/** 供崩溃恢复使用：恢复快照后标记为未保存 */
+export function markDirty(): void {
+  dirty = true;
+  updateTitle();
+}
+
 /* ---------------- 滚动同步（编辑区 → 预览） ---------------- */
 
 let scrollTick = false;
@@ -385,3 +408,5 @@ initChat();
 initTables();
 initRunner();
 initCompletionToggle();
+initAutosaveRecovery();
+scheduleAutoUpdateCheck();

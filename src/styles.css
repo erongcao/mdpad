@@ -827,3 +827,31 @@ pre:hover .code-actions { opacity: 1; }
 }
 .code-inline-btn.primary { color: var(--accent); border-color: var(--accent); }
 .code-inline-btn:hover { background: rgba(127,127,127,0.12); }
+/* 崩溃恢复横幅 */
+#autosave-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  background: #fff7e0;
+  border-bottom: 1px solid #e8d48a;
+  color: #5a4a12;
+}
+
+#autosave-banner span {
+  flex: 1;
+}
+
+#autosave-banner button {
+  font-size: 13px;
+  padding: 2px 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  #autosave-banner {
+    background: #3d3418;
+    border-bottom-color: #6b5a24;
+    color: #ecd9a0;
+  }
+}

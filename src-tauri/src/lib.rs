@@ -877,6 +877,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let app_menu = SubmenuBuilder::new(app, "mdpad")
         .item(&PredefinedMenuItem::about(app, Some("关于 mdpad"), None)?)
         .separator()
+        .item(&mi(app, "check_update", "检查更新…", None)?)
         .item(&mi(app, "settings", "设置…", Some("CmdOrCtrl+,"))?)
         .separator()
         .item(&PredefinedMenuItem::services(app, Some("服务"))?)
@@ -1019,6 +1020,8 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,

@@ -12,6 +12,7 @@ import { runTable } from "./tables";
 import { toggleFocus } from "./focus";
 import { copyForWeChat } from "./wechat";
 import { toggleCompletion } from "./complete";
+import { checkForUpdates } from "./updater";
 
 async function dispatch(id: string) {
   if (id.startsWith("recent:")) {
@@ -43,6 +44,7 @@ async function dispatch(id: string) {
     case "export_html": return doExport("html");
     case "print": return doPrint();
     case "settings": return openSettings();
+    case "check_update": return void checkForUpdates(true);
     case "view_editor": return setMode("editor");
     case "view_split": return setMode("split");
     case "view_preview": return setMode("preview");
