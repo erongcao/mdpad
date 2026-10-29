@@ -25,7 +25,7 @@ import { initChat } from "./chat";
 import { tableKeymap, initTables } from "./tables";
 import { focusCompartment, initialFocusExtension } from "./focus";
 import { attachRunButtons, initRunner } from "./runner";
-import { completionExtension } from "./complete";
+import { completionExtension, initCompletionToggle } from "./complete";
 
 export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -378,3 +378,4 @@ initMenu();
 initChat();
 initTables();
 initRunner();
+initCompletionToggle();

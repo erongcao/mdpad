@@ -169,4 +169,26 @@ export function toggleCompletion() {
     if (activeId) { void invoke("ai_cancel", { id: activeId }); activeId = null; }
   }
   view.focus();
+  refreshToggleBtn();
+}
+
+/* ---------------- 工具栏开关 ---------------- */
+
+function refreshToggleBtn() {
+  const btn = document.querySelector("#btn-completion");
+  if (btn) btn.classList.toggle("active", enabled);
+}
+
+export function isCompletionEnabled(): boolean {
+  return enabled;
+}
+
+export function initCompletionToggle() {
+  const btn = document.querySelector("#btn-completion");
+  if (!btn) return;
+  refreshToggleBtn();
+  btn.addEventListener("click", () => {
+    toggleCompletion();
+    refreshToggleBtn();
+  });
 }

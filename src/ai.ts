@@ -513,12 +513,12 @@ export function initAi() {
 
 /* ---------------- 代码块替换（AI 修复用） ---------------- */
 
-function extractFencedCode(text: string): string | null {
+export function extractFencedCode(text: string): string | null {
   const m = text.match(/```[\w+-]*\n([\s\S]*?)```/);
   return m ? m[1].replace(/\n$/, "") : null;
 }
 
-function findFenceByOccurrence(codeText: string, occurrence: number): { from: number; to: number } | null {
+export function findFenceByOccurrence(codeText: string, occurrence: number): { from: number; to: number } | null {
   const doc = view.state.doc;
   const wanted = codeText.trim();
   let count = 0;
