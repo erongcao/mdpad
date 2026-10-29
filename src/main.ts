@@ -23,8 +23,17 @@ import { initAi } from "./ai";
 import { initMenu } from "./menu";
 import { initChat } from "./chat";
 import { tableKeymap, initTables } from "./tables";
+import { focusCompartment, initialFocusExtension } from "./focus";
 
-const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+
+// 给块级元素注入源码行号，滚动同步用
+const origRenderToken = md.renderer.renderToken.bind(md.renderer);
+md.renderer.renderToken = function (tokens, idx, options) {
+  const t = tokens[idx];
+  if (t.map) t.attrJoin("data-line", String(t.map[0]));
+  return origRenderToken(tokens, idx, options);
+};
 
 const WELCOME = `# 欢迎使用 mdpad
 
@@ -133,6 +142,7 @@ export const view = new EditorView({
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown(),
       highlightCompartment.of(syntaxHighlighting(darkQuery.matches ? darkHighlight : lightHighlight)),
+      focusCompartment.of(initialFocusExtension()),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           dirty = true;
@@ -330,6 +340,29 @@ window.addEventListener("mouseup", () => {
 export function getCurrentPath(): string | null {
   return currentPath;
 }
+
+/* ---------------- 滚动同步（编辑区 → 预览） ---------------- */
+
+let scrollTick = false;
+view.scrollDOM.addEventListener("scroll", () => {
+  if (mode !== "split" || scrollTick) return;
+  scrollTick = true;
+  requestAnimationFrame(() => {
+    scrollTick = false;
+    const topBlock = view.lineBlockAtHeight(view.scrollDOM.scrollTop + 24);
+    const lineNo = view.state.doc.line(topBlock.from).number - 1; // data-line 是 0 起始
+    const anchors = previewEl.querySelectorAll<HTMLElement>("[data-line]");
+    let target: HTMLElement | null = null;
+    for (const el of anchors) {
+      if (Number(el.dataset.line) <= lineNo) target = el;
+      else break;
+    }
+    if (target) {
+      const top = target.getBoundingClientRect().top - previewEl.getBoundingClientRect().top + previewEl.scrollTop;
+      previewEl.scrollTo({ top: Math.max(0, top - 12) });
+    }
+  });
+});
 
 /* ---------------- 启动 ---------------- */
 

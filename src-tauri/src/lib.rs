@@ -649,6 +649,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let export_sub = SubmenuBuilder::new(app, "导出")
         .item(&mi(app, "export_docx", "Word (.docx)", None)?)
         .item(&mi(app, "export_html", "HTML 网页", None)?)
+        .separator()
+        .item(&mi(app, "export_wechat", "复制为公众号格式", None)?)
         .build()?;
 
     let file_menu = SubmenuBuilder::new(app, "文件")
@@ -727,6 +729,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&mi(app, "view_preview", "预览", Some("CmdOrCtrl+3"))?)
         .separator()
         .item(&mi(app, "chat_toggle", "AI 对话", Some("CmdOrCtrl+J"))?)
+        .item(&mi(app, "view_focus", "专注模式", Some("Shift+CmdOrCtrl+F"))?)
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "窗口")

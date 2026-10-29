@@ -9,6 +9,8 @@ import { openSettings } from "./ai";
 import { runFormat } from "./format";
 import { toggleChat } from "./chat";
 import { runTable } from "./tables";
+import { toggleFocus } from "./focus";
+import { copyForWeChat } from "./wechat";
 
 async function dispatch(id: string) {
   if (id.startsWith("recent:")) {
@@ -44,6 +46,8 @@ async function dispatch(id: string) {
     case "view_split": return setMode("split");
     case "view_preview": return setMode("preview");
     case "chat_toggle": return toggleChat();
+    case "view_focus": return toggleFocus();
+    case "export_wechat": return void copyForWeChat();
     case "undo": undo(view); return void view.focus();
     case "redo": redo(view); return void view.focus();
     case "find":

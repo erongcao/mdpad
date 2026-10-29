@@ -729,3 +729,7 @@ body {
   cursor: default;
 }
 #tbl-dialog button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------- 专注模式 ---------- */
+.cm-line { transition: opacity 0.18s; }
+.cm-line.cm-dim { opacity: 0.3; }
