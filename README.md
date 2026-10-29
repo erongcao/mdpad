@@ -64,7 +64,10 @@
 
 从 Releases 下载 mdpad_aarch64.dmg，拖进「应用程序」。
 
-未签名的应用首次打开会被 Gatekeeper 拦：右键 → 打开，或在 系统设置 → 隐私与安全性 里允许。
+未签名的应用首次打开会被 Gatekeeper 拦：
+
+- 提示「无法验证开发者」：右键 → 打开
+- 提示「已损坏」（应用经过 AirDrop/微信等传输后被加了隔离标记）：终端执行 `xattr -cr /Applications/mdpad.app` 后打开
 
 ## 使用
 
