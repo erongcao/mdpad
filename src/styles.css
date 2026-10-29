@@ -810,3 +810,6 @@ pre:hover .code-actions { opacity: 1; }
   cursor: default;
 }
 .code-fix-btn:hover { background: rgba(10, 132, 255, 0.08); }
+
+/* ---------- AI 幽灵补全 ---------- */
+.cm-ghost { color: var(--fg-dim); opacity: 0.55; }

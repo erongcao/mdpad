@@ -25,6 +25,7 @@ import { initChat } from "./chat";
 import { tableKeymap, initTables } from "./tables";
 import { focusCompartment, initialFocusExtension } from "./focus";
 import { attachRunButtons, initRunner } from "./runner";
+import { completionExtension } from "./complete";
 
 export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -139,6 +140,7 @@ export const view = new EditorView({
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       placeholder("开始写点什么…"),
+      completionExtension,
       tableKeymap,
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       markdown(),

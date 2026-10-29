@@ -318,10 +318,11 @@ fn keychain_get(provider: &str) -> String {
             .trim_end_matches(['\r', '\n'])
             .to_string(),
         Ok(o) => {
-            log_line(&format!(
-                "keychain 读取失败 provider={provider}: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            ));
+            // 本地服务商本来就没有 key，"找不到" 是常态不记日志
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            if !err.contains("could not be found") {
+                log_line(&format!("keychain 读取失败 provider={provider}: {err}"));
+            }
             String::new()
         }
         Err(e) => {
@@ -680,7 +681,7 @@ async fn run_check(lang: String, code: String) -> Result<CheckResult, String> {
         "julia" => {
             let f = dir.join("check.jl");
             fs::write(&f, &code).map_err(|e| e.to_string())?;
-            (String::new(), vec!["-e".into(), format!("Meta.parse(read(\"{}\", String)); println(\"OK\")", f.to_string_lossy())])
+            (String::new(), vec!["-e".into(), format!("Meta.parseall(read(\"{}\", String)); println(\"OK\")", f.to_string_lossy())])
         }
         _ => return Err("不支持的语言".into()),
     };
@@ -948,6 +949,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .separator()
         .item(&mi(app, "chat_toggle", "AI 对话", Some("CmdOrCtrl+J"))?)
         .item(&mi(app, "view_focus", "专注模式", Some("Shift+CmdOrCtrl+F"))?)
+        .item(&mi(app, "view_completion", "AI 代码补全", None)?)
         .build()?;
 
     let window_menu = SubmenuBuilder::new(app, "窗口")
