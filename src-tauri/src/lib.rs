@@ -699,9 +699,25 @@ async fn run_check(lang: String, code: String) -> Result<CheckResult, String> {
     let message = if ok {
         "语法检查通过".to_string()
     } else {
-        String::from_utf8_lossy(&out.stderr).chars().take(500).collect()
+        // 清理报错：去掉临时文件路径和 R 的 "Error in ..." 包装，只留有效信息
+        let raw = String::from_utf8_lossy(&out.stderr);
+        let mut cleaned = raw
+            .replace(&dir.to_string_lossy().to_string(), "代码")
+            .replace("check.py", "代码")
+            .replace("check.R", "代码")
+            .replace("check.jl", "代码")
+            .trim()
+            .to_string();
+        if let Some(pos) = cleaned.find(" : \n") {
+            // R 的 "Error in parse(...) : \n  细节" 结构
+            cleaned = cleaned[pos + 5..].trim().to_string();
+        }
+        if let Some(stripped) = cleaned.strip_prefix("Error in parse") {
+            cleaned = stripped.trim_start_matches(['(', ')', ' ']).trim_start_matches("file").to_string();
+        }
+        cleaned.chars().take(400).collect()
     };
-    log_line(&format!("run_check: lang={lang} ok={ok}"));
+    log_line(&format!("run_check: lang={lang} ok={ok} msg={}", message.chars().take(120).collect::<String>()));
     Ok(CheckResult {
         ok,
         message,
