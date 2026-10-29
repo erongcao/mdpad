@@ -24,6 +24,44 @@ fn write_text_file(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, contents).map_err(|e| format!("保存失败：{e}"))
 }
 
+
+/* ---------------- 崩溃恢复快照（写真实文件，比 WebKit localStorage 可靠） ---------------- */
+
+fn autosave_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home)
+        .join("Library")
+        .join("Application Support")
+        .join("mdpad")
+        .join("autosave.json")
+}
+
+#[tauri::command]
+fn autosave_write(contents: String) -> Result<(), String> {
+    let p = autosave_path();
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
+    }
+    // 原子写：先写临时文件再改名，崩溃时不会留下半截文件
+    let tmp = p.with_extension("json.tmp");
+    fs::write(&tmp, contents).map_err(|e| format!("快照写入失败：{e}"))?;
+    fs::rename(&tmp, &p).map_err(|e| format!("快照改名失败：{e}"))
+}
+
+#[tauri::command]
+fn autosave_read() -> Option<String> {
+    fs::read_to_string(autosave_path()).ok()
+}
+
+#[tauri::command]
+fn autosave_clear() -> Result<(), String> {
+    let p = autosave_path();
+    if p.exists() {
+        fs::remove_file(&p).map_err(|e| format!("快照删除失败：{e}"))?;
+    }
+    Ok(())
+}
+
 /* ---------------- AI ---------------- */
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -1044,6 +1082,9 @@ pub fn run() {
             run_code,
             run_check,
             take_pending_open,
+            autosave_write,
+            autosave_read,
+            autosave_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

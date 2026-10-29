@@ -16,6 +16,7 @@ Not another markdown editor. mdpad is built around a simple loop: write, let AI 
 - Ghost-text AI code completion inside code fences (Tab to accept), toggleable from the toolbar
 - Export: Word (.docx) and standalone HTML via pandoc, PDF via system print, one-click copy styled for WeChat Official Account editor
 - Privacy: documents never leave your machine; API keys live in the macOS Keychain, never in plaintext files
+- Auto-update: signed updates delivered via GitHub Releases (mdpad menu → 检查更新), plus crash recovery that offers to restore unsaved changes after an unexpected quit
 
 ## Install
 

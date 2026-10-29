@@ -1,8 +1,10 @@
-import { view, setDoc, markDirty, getCurrentPath, isDirty } from "./main";
+import { invoke } from "@tauri-apps/api/core";
+import { view, setDoc, markDirty, getCurrentPath, isDirty, inTauri } from "./main";
 
 /**
  * 崩溃/意外退出保护：
- * - 文档每次变动后 1.5s 落一份快照到 localStorage
+ * - 文档每次变动后 1.5s 落一份快照
+ * - Tauri 内走 Rust 原子写文件（kill -9 也不丢）；浏览器 dev 环境退到 localStorage
  * - 保存成功或用户明确放弃修改时清除快照
  * - 下次启动发现快照 → 顶部横幅询问恢复/丢弃
  */
@@ -18,13 +20,13 @@ interface Snapshot {
 
 export function scheduleAutosave(): void {
   window.clearTimeout(timer);
-  timer = window.setTimeout(snapshotNow, 1500);
+  timer = window.setTimeout(() => void snapshotNow(), 1500);
 }
 
-function snapshotNow(): void {
+async function snapshotNow(): Promise<void> {
   // 只在有未保存修改时保留快照；刚打开/刚保存的文档不产生恢复横幅
   if (!isDirty()) {
-    clearAutosave();
+    await clearAutosave();
     return;
   }
   const snap: Snapshot = {
@@ -32,15 +34,31 @@ function snapshotNow(): void {
     content: view.state.doc.toString(),
     ts: Date.now(),
   };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(snap));
-  } catch {
-    // 配额满（超大文档）就放弃本次快照，不影响编辑
+  const raw = JSON.stringify(snap);
+  if (inTauri) {
+    try {
+      await invoke("autosave_write", { contents: raw });
+    } catch {
+      // 写失败不打扰编辑
+    }
+  } else {
+    try {
+      localStorage.setItem(KEY, raw);
+    } catch {
+      // 配额满就放弃本次快照
+    }
   }
 }
 
-export function clearAutosave(): void {
+export async function clearAutosave(): Promise<void> {
   window.clearTimeout(timer);
+  if (inTauri) {
+    try {
+      await invoke("autosave_clear");
+    } catch {
+      /* ignore */
+    }
+  }
   try {
     localStorage.removeItem(KEY);
   } catch {
@@ -48,10 +66,24 @@ export function clearAutosave(): void {
   }
 }
 
-function loadSnapshot(): Snapshot | null {
+async function loadSnapshot(): Promise<Snapshot | null> {
+  let raw: string | null = null;
+  if (inTauri) {
+    try {
+      raw = await invoke<string | null>("autosave_read");
+    } catch {
+      raw = null;
+    }
+  }
+  if (!raw) {
+    try {
+      raw = localStorage.getItem(KEY);
+    } catch {
+      raw = null;
+    }
+  }
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
     const s = JSON.parse(raw) as Snapshot;
     if (typeof s.content !== "string") return null;
     return s;
@@ -60,8 +92,8 @@ function loadSnapshot(): Snapshot | null {
   }
 }
 
-export function initAutosaveRecovery(): void {
-  const snap = loadSnapshot();
+export async function initAutosaveRecovery(): Promise<void> {
+  const snap = await loadSnapshot();
   if (!snap) return;
   showBanner(snap);
 }
@@ -74,7 +106,7 @@ function showBanner(snap: Snapshot): void {
   bar.id = "autosave-banner";
 
   const label = document.createElement("span");
-  label.textContent = `检测到上次未保存的修改：${name}（${time}）`;
+  label.textContent = "检测到上次未保存的修改：" + name + "（" + time + "）";
 
   const restore = document.createElement("button");
   restore.textContent = "恢复";
@@ -82,14 +114,14 @@ function showBanner(snap: Snapshot): void {
   restore.addEventListener("click", () => {
     setDoc(snap.content, snap.path);
     markDirty();
-    snapshotNow();
+    void snapshotNow();
     bar.remove();
   });
 
   const discard = document.createElement("button");
   discard.textContent = "丢弃";
   discard.addEventListener("click", () => {
-    clearAutosave();
+    void clearAutosave();
     bar.remove();
   });
 
