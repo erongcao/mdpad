@@ -115,14 +115,22 @@ const PRESETS: Record<string, Preset> = {
   },
 };
 
+interface CodeFixTarget {
+  lang: string;
+  codeText: string;
+  occurrence: number;
+}
+
 interface Job {
   id: string;
-  action: ActionKey;
+  action: string;
+  mode: "selection" | "code";
   from: number;
   to: number;
   result: string;
   reasoning: string;
   running: boolean;
+  codeFix?: CodeFixTarget;
 }
 
 let job: Job | null = null;
@@ -196,16 +204,21 @@ function closeDrawer() {
   el<HTMLElement>("#ai-drawer").hidden = true;
 }
 
-async function startAction(action: ActionKey) {
+interface AiTaskOpts {
+  title: string;
+  user: string;
+  system?: string;
+  mode: "selection" | "code";
+  from?: number;
+  to?: number;
+  codeFix?: CodeFixTarget;
+}
+
+export async function runAiTask(opts: AiTaskOpts) {
   if (!inTauri) {
     alert("AI 功能需要在桌面应用里运行。");
     return;
   }
-  const sel = view.state.selection.main;
-  if (sel.empty) return;
-  const text = view.state.doc.sliceString(sel.from, sel.to);
-  hideBar();
-
   const config = await getConfig();
   const provider = config.providers[config.active];
   if (!provider || !provider.base_url || !provider.model) {
@@ -217,17 +230,31 @@ async function startAction(action: ActionKey) {
 
   job = {
     id: `job-${Date.now()}`,
-    action,
-    from: sel.from,
-    to: sel.to,
+    action: opts.title,
+    mode: opts.mode,
+    from: opts.from ?? 0,
+    to: opts.to ?? 0,
     result: "",
     reasoning: "",
     running: true,
+    codeFix: opts.codeFix,
   };
 
-  openDrawer(`${ACTIONS[action].label} · ${presetLabel} · ${provider.model}`);
+  openDrawer(`${opts.title} · ${presetLabel} · ${provider.model}`);
   el("#ai-output").innerHTML = "";
   el("#ai-stop").hidden = false;
+  // 按任务类型调整底部按钮
+  const replaceBtn = el<HTMLButtonElement>("#ai-replace");
+  const insertBtn = el<HTMLButtonElement>("#ai-insert-after");
+  if (opts.mode === "code") {
+    insertBtn.hidden = true;
+    replaceBtn.hidden = !opts.codeFix;
+    replaceBtn.textContent = "替换代码块";
+  } else {
+    insertBtn.hidden = false;
+    replaceBtn.hidden = false;
+    replaceBtn.textContent = "替换选区";
+  }
   setStatus("连接中…");
   await ensureListener();
 
@@ -238,16 +265,30 @@ async function startAction(action: ActionKey) {
       provider: config.active,
       model: provider.model,
       messages: [
-        { role: "system", content: "你是一位严谨的中文写作助手。" },
-        { role: "user", content: ACTIONS[action].prompt(text) },
+        { role: "system", content: opts.system ?? "你是一位严谨的中文写作助手。" },
+        { role: "user", content: opts.user },
       ],
     });
   } catch (err) {
-    job.running = false;
+    if (job) job.running = false;
     el("#ai-stop").hidden = true;
     setStatus(`出错：${String(err)}`);
-    void invoke("log_frontend", { msg: "startAction 出错: " + String(err) });
+    void invoke("log_frontend", { msg: "runAiTask 出错: " + String(err) });
   }
+}
+
+async function startAction(action: ActionKey) {
+  const sel = view.state.selection.main;
+  if (sel.empty) return;
+  const text = view.state.doc.sliceString(sel.from, sel.to);
+  hideBar();
+  await runAiTask({
+    title: ACTIONS[action].label,
+    user: ACTIONS[action].prompt(text),
+    mode: "selection",
+    from: sel.from,
+    to: sel.to,
+  });
 }
 
 /* ---------------- 浮动条 ---------------- */
@@ -423,6 +464,10 @@ export function initAi() {
   });
   el("#ai-replace").addEventListener("click", () => {
     if (!job?.result) return;
+    if (job.mode === "code") {
+      if (replaceCodeBlock(job)) closeDrawer();
+      return;
+    }
     view.dispatch({ changes: { from: job.from, to: job.to, insert: job.result } });
     view.focus();
     closeDrawer();
@@ -464,4 +509,55 @@ export function initAi() {
     const v = (e.target as HTMLSelectElement).value;
     if (v) el<HTMLInputElement>("#ai-model").value = v;
   });
+}
+
+/* ---------------- 代码块替换（AI 修复用） ---------------- */
+
+function extractFencedCode(text: string): string | null {
+  const m = text.match(/```[\w+-]*\n([\s\S]*?)```/);
+  return m ? m[1].replace(/\n$/, "") : null;
+}
+
+function findFenceByOccurrence(codeText: string, occurrence: number): { from: number; to: number } | null {
+  const doc = view.state.doc;
+  const wanted = codeText.trim();
+  let count = 0;
+  let i = 1;
+  while (i <= doc.lines) {
+    const line = doc.line(i);
+    if (line.text.trim().startsWith("```")) {
+      let j = i + 1;
+      while (j <= doc.lines && !doc.line(j).text.trim().startsWith("```")) j++;
+      if (j > doc.lines) break;
+      const from = doc.line(i + 1).from;
+      const to = doc.line(j).from;
+      const inner = view.state.sliceDoc(from, to).trim();
+      if (inner === wanted) {
+        if (count === occurrence) return { from, to };
+        count++;
+      }
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return null;
+}
+
+function replaceCodeBlock(j: Job): boolean {
+  const fix = j.codeFix;
+  if (!fix) return false;
+  const code = extractFencedCode(j.result);
+  if (!code) {
+    setStatus("AI 的回答里没有代码块，无法替换");
+    return false;
+  }
+  const pos = findFenceByOccurrence(fix.codeText, fix.occurrence);
+  if (!pos) {
+    setStatus("原文档里找不到对应的代码块（可能被改过）");
+    return false;
+  }
+  view.dispatch({ changes: { from: pos.from, to: pos.to, insert: code + "\n" } });
+  view.focus();
+  return true;
 }

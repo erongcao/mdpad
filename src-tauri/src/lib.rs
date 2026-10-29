@@ -648,6 +648,66 @@ async fn run_code(lang: String, code: String) -> Result<RunResult, String> {
     })
 }
 
+
+#[derive(Serialize)]
+struct CheckResult {
+    ok: bool,
+    message: String,
+    duration_ms: u128,
+}
+
+/// 语法检查（不执行代码）
+#[tauri::command]
+async fn run_check(lang: String, code: String) -> Result<CheckResult, String> {
+    let Some(interp) = find_interpreter(&lang) else {
+        return Err(format!("未找到 {lang} 解释器"));
+    };
+    let started = std::time::Instant::now();
+    let dir = std::env::temp_dir().join(format!("mdpad-check-{}", std::process::id()));
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let (file, args): (String, Vec<String>) = match lang.as_str() {
+        "python" | "python3" => {
+            let f = dir.join("check.py");
+            fs::write(&f, &code).map_err(|e| e.to_string())?;
+            (String::new(), vec!["-m".into(), "py_compile".into(), f.to_string_lossy().to_string()])
+        }
+        "r" | "rscript" => {
+            let f = dir.join("check.R");
+            fs::write(&f, &code).map_err(|e| e.to_string())?;
+            (String::new(), vec!["-e".into(), format!("invisible(parse(file=\"{}\"))", f.to_string_lossy())])
+        }
+        "julia" => {
+            let f = dir.join("check.jl");
+            fs::write(&f, &code).map_err(|e| e.to_string())?;
+            (String::new(), vec!["-e".into(), format!("Meta.parse(read(\"{}\", String)); println(\"OK\")", f.to_string_lossy())])
+        }
+        _ => return Err("不支持的语言".into()),
+    };
+    let _ = file;
+
+    let out = tokio::process::Command::new(&interp)
+        .args(&args)
+        .current_dir(&dir)
+        .output()
+        .await
+        .map_err(|e| format!("运行失败：{e}"))?;
+    let _ = fs::remove_dir_all(&dir);
+
+    let ok = out.status.success();
+    let message = if ok {
+        "语法检查通过".to_string()
+    } else {
+        String::from_utf8_lossy(&out.stderr).chars().take(500).collect()
+    };
+    log_line(&format!("run_check: lang={lang} ok={ok}"));
+    Ok(CheckResult {
+        ok,
+        message,
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
 /* ---------------- 日志 ---------------- */
 
 fn log_path() -> PathBuf {
@@ -951,6 +1011,7 @@ pub fn run() {
             log_frontend,
             code_runners_check,
             run_code,
+            run_check,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
