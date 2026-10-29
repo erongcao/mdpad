@@ -490,6 +490,164 @@ fn pandoc_export(
 
 
 
+
+/* ---------------- 代码块运行 ---------------- */
+
+#[derive(Serialize, Clone)]
+struct RunnerInfo {
+    lang: String,
+    available: bool,
+    path: String,
+}
+
+fn find_interpreter(lang: &str) -> Option<String> {
+    let candidates: Vec<String> = match lang {
+        "python" | "python3" => vec![
+            "/opt/homebrew/bin/python3".into(),
+            "/usr/local/bin/python3".into(),
+            "/usr/bin/python3".into(),
+        ],
+        "r" | "rscript" => vec![
+            "/usr/local/bin/Rscript".into(),
+            "/opt/homebrew/bin/Rscript".into(),
+            "/Library/Frameworks/R.framework/Resources/bin/Rscript".into(),
+        ],
+        "julia" => {
+            let mut v = vec![
+                "/opt/homebrew/bin/julia".into(),
+                "/usr/local/bin/julia".into(),
+            ];
+            // /Applications/Julia-x.y.app 形式
+            if let Ok(entries) = fs::read_dir("/Applications") {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.starts_with("Julia") && name.ends_with(".app") {
+                        v.push(format!(
+                            "/Applications/{}/Contents/Resources/julia/bin/julia",
+                            name
+                        ));
+                    }
+                }
+            }
+            v
+        }
+        _ => return None,
+    };
+    candidates.into_iter().find(|p| Path::new(p).exists())
+}
+
+#[tauri::command]
+fn code_runners_check() -> Vec<RunnerInfo> {
+    ["python", "r", "julia"]
+        .iter()
+        .map(|lang| match find_interpreter(lang) {
+            Some(p) => RunnerInfo {
+                lang: lang.to_string(),
+                available: true,
+                path: p,
+            },
+            None => RunnerInfo {
+                lang: lang.to_string(),
+                available: false,
+                path: String::new(),
+            },
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct RunResult {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    duration_ms: u128,
+    timed_out: bool,
+    images: Vec<String>, // base64 data URI
+}
+
+#[tauri::command]
+async fn run_code(lang: String, code: String) -> Result<RunResult, String> {
+    let Some(interp) = find_interpreter(&lang) else {
+        return Err(format!("未找到 {lang} 解释器"));
+    };
+    let started = std::time::Instant::now();
+
+    // 每次运行一个独立临时目录，运行后扫描新生成的图片
+    let dir = std::env::temp_dir().join(format!("mdpad-run-{}-{}", std::process::id(), started.elapsed().as_nanos()));
+    fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
+    let ext = match lang.as_str() {
+        "python" | "python3" => "py",
+        "r" | "rscript" => "R",
+        "julia" => "jl",
+        _ => "txt",
+    };
+    let script = dir.join(format!("script.{ext}"));
+    fs::write(&script, &code).map_err(|e| format!("写脚本失败：{e}"))?;
+
+    let run = tokio::process::Command::new(&interp)
+        .arg(&script)
+        .current_dir(&dir)
+        .output();
+    let result = match tokio::time::timeout(std::time::Duration::from_secs(120), run).await {
+        Ok(r) => r.map_err(|e| format!("运行失败：{e}"))?,
+        Err(_) => {
+            log_line(&format!("run_code 超时: lang={lang}"));
+            let _ = fs::remove_dir_all(&dir);
+            return Ok(RunResult {
+                stdout: String::new(),
+                stderr: "运行超时（120 秒上限），进程已终止".into(),
+                exit_code: -1,
+                duration_ms: 120000,
+                timed_out: true,
+                images: vec![],
+            });
+        }
+    };
+
+    // 收集运行目录里新生成的图片，转 base64 后清目录
+    let mut images = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let is_img = ["png", "jpg", "jpeg", "svg"]
+                .iter()
+                .any(|ext| name.ends_with(&format!(".{ext}")));
+            if !is_img || name.starts_with("script.") {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(e.path()) {
+                if bytes.len() > 5_000_000 {
+                    continue;
+                }
+                let mime = if name.ends_with(".svg") { "image/svg+xml" } else { "image/png" };
+                use base64::Engine;
+                images.push(format!(
+                    "data:{mime};base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                ));
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+
+    let duration_ms = started.elapsed().as_millis();
+    let stdout = String::from_utf8_lossy(&result.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&result.stderr).to_string();
+    let exit_code = result.status.code().unwrap_or(-1);
+    log_line(&format!(
+        "run_code: lang={lang} exit={exit_code} {duration_ms}ms images={}",
+        images.len()
+    ));
+    Ok(RunResult {
+        stdout,
+        stderr,
+        exit_code,
+        duration_ms,
+        timed_out: false,
+        images,
+    })
+}
+
 /* ---------------- 日志 ---------------- */
 
 fn log_path() -> PathBuf {
@@ -791,6 +949,8 @@ pub fn run() {
             clear_recent_files,
             open_log,
             log_frontend,
+            code_runners_check,
+            run_code,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

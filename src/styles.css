@@ -733,3 +733,45 @@ body {
 /* ---------- 专注模式 ---------- */
 .cm-line { transition: opacity 0.18s; }
 .cm-line.cm-dim { opacity: 0.3; }
+
+/* ---------- 代码块运行 ---------- */
+.code-run-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px 9px;
+  cursor: default;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+pre:hover .code-run-btn { opacity: 1; }
+.code-run-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.code-output {
+  margin: -4px 0 1em;
+  border: 1px solid var(--line);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  background: var(--code-bg);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.code-output pre {
+  margin: 0 0 8px;
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.code-output .code-stderr { color: #c0341d; }
+.code-output-status { color: var(--fg-dim); font-size: 11.5px; }
+.code-output-status.err { color: #c0341d; }
+.code-run-img { max-width: 100%; border-radius: 6px; margin: 4px 0 8px; }

@@ -24,6 +24,7 @@ import { initMenu } from "./menu";
 import { initChat } from "./chat";
 import { tableKeymap, initTables } from "./tables";
 import { focusCompartment, initialFocusExtension } from "./focus";
+import { attachRunButtons, initRunner } from "./runner";
 
 export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -159,6 +160,7 @@ export const view = new EditorView({
 
 export function renderPreview() {
   previewEl.innerHTML = md.render(view.state.doc.toString());
+  attachRunButtons(previewEl);
 }
 
 function schedulePreview() {
@@ -373,3 +375,4 @@ initAi();
 initMenu();
 initChat();
 initTables();
+initRunner();
