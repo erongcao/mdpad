@@ -4,6 +4,7 @@
 
 A native macOS Markdown writing desk — CodeMirror 6 editor, built-in AI writing assistant, executable code blocks, and pandoc export. The whole app is about 6 MB.
 
+![mdpad — split view with AI panel](docs/screenshots/main.png)
 
 ## Why mdpad
 

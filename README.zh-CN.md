@@ -4,6 +4,8 @@
 
 一个 macOS 上的 Markdown 写作工具：CodeMirror 6 编辑器 + AI 辅助写作 + pandoc 导出，原生外壳只有约 6 MB。
 
+![mdpad — 分栏视图 + AI 面板](docs/screenshots/main.png)
+
 ## 功能
 
 ### 编辑
