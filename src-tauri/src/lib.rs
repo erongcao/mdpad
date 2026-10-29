@@ -768,6 +768,16 @@ fn open_log() -> Result<(), String> {
     tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| e.to_string())
 }
 
+
+/* ---------------- 文件关联打开 ---------------- */
+
+static PENDING_OPEN: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[tauri::command]
+fn take_pending_open() -> Vec<String> {
+    std::mem::take(&mut *PENDING_OPEN.lock().unwrap())
+}
+
 /* ---------------- 最近文件 ---------------- */
 
 fn recent_store_path() -> PathBuf {
@@ -1001,7 +1011,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             build_menu(app.handle())?;
             rebuild_recent_menu(app.handle()).map_err(|e| e.to_string())?;
@@ -1030,7 +1040,21 @@ pub fn run() {
             code_runners_check,
             run_code,
             run_check,
+            take_pending_open,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app, event| {
+        // macOS 双击/拖放到 Dock 图标打开文件
+        if let tauri::RunEvent::Opened { urls } = event {
+            for url in urls {
+                if let Ok(path) = url.to_file_path() {
+                    let p = path.to_string_lossy().to_string();
+                    PENDING_OPEN.lock().unwrap().push(p.clone());
+                    let _ = app.emit("file-opened", p);
+                }
+            }
+        }
+    });
 }

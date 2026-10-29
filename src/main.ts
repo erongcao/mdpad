@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import { initAi } from "./ai";
 import { initMenu } from "./menu";
 import { initChat } from "./chat";
@@ -295,6 +296,11 @@ if (win) {
 }
 
 if (inTauri) {
+  // 文件关联打开（双击 .md / 拖到 Dock）
+  void listen<string>("file-opened", (e) => void openPath(e.payload));
+  void invoke<string[]>("take_pending_open").then((paths) => {
+    if (paths.length) void openPath(paths[paths.length - 1]);
+  });
   void getCurrentWebview().onDragDropEvent(async (event) => {
     if (event.payload.type !== "drop") return;
     const path = event.payload.paths.find((p) => /\.(md|markdown|mdown|txt)$/i.test(p));
