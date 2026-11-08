@@ -1,8 +1,8 @@
 mdpad — 使用说明 / Notes
 ===========================
 
-macOS Markdown 写作台，版本 1.1.2。
-A macOS Markdown desk. Version 1.1.2.
+macOS Markdown 写作台，版本 1.1.3。
+A macOS Markdown desk. Version 1.1.3.
 
 安装 / Install
 --------------
@@ -34,6 +34,14 @@ A macOS Markdown desk. Version 1.1.2.
 
 也可以把 .md 文件拖进窗口。
 You can also drop a .md file onto the window.
+
+更新 / Updates
+--------------
+mdpad 菜单 → 检查更新。从 1.1.3 起，主窗口可以检查、下载并安装签名更新，装完自动重启。
+已经装了 1.1.2 或更早版本的，先从发布页装一次 1.1.3。
+
+mdpad menu → 检查更新. From 1.1.3 the main window can check, download, and install a signed update, then relaunch.
+If you already have 1.1.2 or earlier, install 1.1.3 once from the release page.
 
 数据放在哪里 / Where data lives
 -------------------------------

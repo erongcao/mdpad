@@ -4,7 +4,7 @@
 
 macOS 上的 Markdown 写作台：CodeMirror 6 编辑、AI 辅助、本地可运行的代码块、pandoc 导出。外壳是 Tauri 2，大约 6 MB，不带 Chromium，也不带 Node 运行时。
 
-当前版本：**1.1.2**。
+当前版本：**1.1.3**。
 
 ![mdpad — 分栏视图 + AI 面板](docs/screenshots/main.png)
 
@@ -19,6 +19,11 @@ macOS 上的 Markdown 写作台：CodeMirror 6 编辑、AI 辅助、本地可运
 - 导出：pandoc 出 Word 和单文件 HTML，系统打印出 PDF，一键复制成公众号排版
 - 隐私：文件留在磁盘上。API Key 在 macOS 钥匙串里。预览显示文稿旁边的本地图片，远程图片不会去拉取
 - 更新：签名包从 GitHub Releases 下来（mdpad 菜单 → 检查更新）。崩溃后重开会问要不要恢复未保存的修改
+
+## 1.1.3 改了什么
+
+- 主窗口可以检查更新、下载、安装，并在安装后重启。mdpad 菜单 → 检查更新会连到 GitHub Releases。启动几秒后也会静默查一次，只有发现新版本才打扰你
+- 已经装上的 1.1.2 及更早版本仍是旧的权限名单，自己拉不到这一版。先从发布页装一次 1.1.3。之后的版本可以从菜单里更新
 
 ## 1.1.2 改了什么
 
@@ -169,7 +174,7 @@ npm run tauri build  # 打包，产物在 src-tauri/target/release/bundle/
 有 `~/.tauri/mdpad.key` 时，可以打签名更新包：
 
 ```bash
-scripts/release.sh 1.1.2 "说明"
+scripts/release.sh 1.1.3 "说明"
 ```
 
 ## 技术栈

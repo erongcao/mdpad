@@ -4,7 +4,7 @@
 
 A native macOS Markdown writing desk. CodeMirror 6 for editing, an AI writing assistant, locally executable code blocks, and pandoc export. The shell is Tauri 2, about 6 MB, with no bundled Chromium or Node runtime.
 
-Current version: **1.1.2**.
+Current version: **1.1.3**.
 
 ![mdpad — split view with AI panel](docs/screenshots/main.png)
 
@@ -19,6 +19,11 @@ mdpad is built around one loop: write, let AI help, run your code, export the re
 - Export: Word and standalone HTML via pandoc, PDF via the system print dialog, one-click copy styled for the WeChat Official Account editor
 - Privacy: the file stays on disk. API keys stay in the macOS Keychain. The preview shows local images beside the document. Remote images are not fetched
 - Updates: signed updates from GitHub Releases (mdpad menu → 检查更新). After a crash, a banner offers to restore unsaved work
+
+## What changed in 1.1.3
+
+- The main window may check for updates, download them, install them, and relaunch afterward. mdpad menu → 检查更新 reaches GitHub Releases. A silent check also runs a few seconds after launch, and only speaks up when a newer version exists
+- An installed copy of 1.1.2 or earlier still has the old permission list, so it cannot fetch this release by itself. Install 1.1.3 once from the release page. Later releases can update from the menu
 
 ## What changed in 1.1.2
 
@@ -169,7 +174,7 @@ npm run tauri build  # release bundle in src-tauri/target/release/bundle/
 A signed update build, when `~/.tauri/mdpad.key` is present:
 
 ```bash
-scripts/release.sh 1.1.2 "notes"
+scripts/release.sh 1.1.3 "notes"
 ```
 
 ## Tech stack
