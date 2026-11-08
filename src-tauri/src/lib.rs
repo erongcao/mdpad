@@ -881,15 +881,219 @@ async fn run_captured(
 }
 
 fn image_mime(name: &str) -> Option<&'static str> {
-    if name.ends_with(".svg") {
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".svg") {
         Some("image/svg+xml")
-    } else if name.ends_with(".png") {
+    } else if lower.ends_with(".png") {
         Some("image/png")
-    } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
         Some("image/jpeg")
+    } else if lower.ends_with(".gif") {
+        Some("image/gif")
+    } else if lower.ends_with(".webp") {
+        Some("image/webp")
     } else {
         None
     }
+}
+
+const MAX_LOCAL_IMAGE: usize = 15 * 1024 * 1024;
+
+fn from_hex(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (from_hex(bytes[i + 1]), from_hex(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// 远程地址返回 None。相对路径、绝对路径和 file:// 留给文稿目录解析。
+fn local_image_src(src: &str) -> Option<String> {
+    let src = src.trim();
+    if src.is_empty() || src.starts_with("data:") || src.starts_with('#') {
+        return None;
+    }
+    let mut decoded = percent_decode(src);
+    if decoded.contains('\0') {
+        return None;
+    }
+    if let Some(rest) = decoded.strip_prefix("file://") {
+        decoded = if let Some(path) = rest.strip_prefix("localhost") {
+            format!("/{}", path.trim_start_matches('/'))
+        } else {
+            rest.to_string()
+        };
+    }
+    let lower = decoded.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") || decoded.starts_with("//") {
+        return None;
+    }
+    if decoded.contains("://") {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn resolve_local_image(doc_path: &Path, src: &str) -> Option<PathBuf> {
+    let decoded = local_image_src(src)?;
+    let raw = Path::new(&decoded);
+    let path = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        let parent = doc_path.parent()?;
+        if parent.as_os_str().is_empty() {
+            return None;
+        }
+        parent.join(raw)
+    };
+    let name = path.file_name()?.to_string_lossy();
+    image_mime(&name)?;
+    Some(path)
+}
+
+fn image_data_url(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_string_lossy();
+    let mime = image_mime(&name)?;
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_LOCAL_IMAGE as u64 {
+        return None;
+    }
+    let bytes = fs::read(path).ok()?;
+    if bytes.len() > MAX_LOCAL_IMAGE {
+        return None;
+    }
+    use base64::Engine;
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+fn doc_dir(doc_path: &str) -> Result<&Path, String> {
+    Path::new(doc_path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "文稿还没有保存位置".to_string())
+}
+
+fn relative_inside(doc_dir: &Path, src: &Path) -> Option<String> {
+    let dir = doc_dir.canonicalize().ok()?;
+    let file = src.canonicalize().ok()?;
+    let rel = file.strip_prefix(&dir).ok()?;
+    if rel.as_os_str().is_empty() {
+        return None;
+    }
+    let text = rel.to_string_lossy().replace('\\', "/");
+    if text == ".." || text.starts_with("../") {
+        return None;
+    }
+    Some(text)
+}
+
+fn unique_image_name(dir: &Path, preferred: &str, ext: &str) -> String {
+    let preferred = preferred.rsplit(['/', '\\']).next().unwrap_or(preferred);
+    if !preferred.is_empty()
+        && preferred != "."
+        && preferred != ".."
+        && image_mime(preferred).is_some()
+        && !dir.join(preferred).exists()
+    {
+        return preferred.to_string();
+    }
+    for n in 1..10_000 {
+        let name = format!("mdpad-image-{n}.{ext}");
+        if !dir.join(&name).exists() {
+            return name;
+        }
+    }
+    format!("mdpad-image-{}.{ext}", next_id())
+}
+
+fn write_image_beside(dir: &Path, preferred: &str, ext: &str, bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("图片是空的".into());
+    }
+    if bytes.len() > MAX_LOCAL_IMAGE {
+        return Err("图片超过 15 MB".into());
+    }
+    if image_mime(&format!("f.{ext}")).is_none() {
+        return Err("不支持的图片格式".into());
+    }
+    let name = unique_image_name(dir, preferred, ext);
+    atomic_write(&dir.join(&name), bytes)?;
+    Ok(name)
+}
+
+/// 按文稿目录把本地图片读成 data URI。远程地址、缺失文件和过大的文件返回空字符串。
+#[tauri::command]
+fn load_local_images(doc_path: String, srcs: Vec<String>) -> Vec<String> {
+    let doc = Path::new(&doc_path);
+    srcs.into_iter()
+        .map(|src| {
+            resolve_local_image(doc, &src)
+                .and_then(|path| image_data_url(&path))
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// 把粘贴进来的图片写到文稿旁边，返回相对路径。
+#[tauri::command]
+fn save_image_beside_doc(doc_path: String, data: String, ext: String) -> Result<String, String> {
+    let dir = doc_dir(&doc_path)?;
+    let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .map_err(|_| "图片数据无法识别".to_string())?;
+    write_image_beside(dir, "", &ext, &bytes)
+}
+
+/// 拖进来的图片：已经在文稿目录里就沿用相对路径，否则复制过去。
+#[tauri::command]
+fn import_image_file(doc_path: String, source_path: String) -> Result<String, String> {
+    let dir = doc_dir(&doc_path)?;
+    let src = Path::new(&source_path);
+    if !src.is_file() {
+        return Err("找不到这张图片".into());
+    }
+    let ext = src
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if image_mime(&format!("f.{ext}")).is_none() {
+        return Err("不是支持的图片格式".into());
+    }
+    if let Some(rel) = relative_inside(dir, src) {
+        return Ok(rel);
+    }
+    let bytes = fs::read(src).map_err(|e| format!("读取图片失败：{e}"))?;
+    let preferred = src
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    write_image_beside(dir, &preferred, &ext, &bytes)
 }
 
 #[tauri::command]
@@ -1361,6 +1565,9 @@ pub fn run() {
             code_runners_check,
             run_code,
             run_check,
+            load_local_images,
+            save_image_beside_doc,
+            import_image_file,
             take_pending_open,
             autosave_write,
             autosave_read,
@@ -1386,6 +1593,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
 
     #[test]
     fn utf8_survives_a_split_han_character() {
@@ -1426,6 +1634,8 @@ mod tests {
         assert_eq!(image_mime("plot.jpeg"), Some("image/jpeg"));
         assert_eq!(image_mime("plot.png"), Some("image/png"));
         assert_eq!(image_mime("plot.svg"), Some("image/svg+xml"));
+        assert_eq!(image_mime("plot.GIF"), Some("image/gif"));
+        assert_eq!(image_mime("dir/plot.webp"), Some("image/webp"));
         assert_eq!(image_mime("notes.txt"), None);
     }
 
@@ -1452,6 +1662,56 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn local_image_reads_a_file_beside_the_document() {
+        let dir = TempDir::new("img").unwrap();
+        let doc = dir.path().join("note.md");
+        fs::write(&doc, "").unwrap();
+        fs::write(dir.path().join("my plot.png"), b"png-bytes").unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub").join("a.gif"), b"GIF").unwrap();
+        let got = load_local_images(
+            doc.to_string_lossy().into(),
+            vec![
+                "my%20plot.png".into(),
+                "sub/a.gif".into(),
+                "https://example.com/a.png".into(),
+                "missing.png".into(),
+                "notes.txt".into(),
+            ],
+        );
+        assert!(got[0].starts_with("data:image/png;base64,"));
+        assert!(got[1].starts_with("data:image/gif;base64,"));
+        assert_eq!(&got[2..], &["", "", ""]);
+    }
+
+    #[test]
+    fn import_keeps_or_copies_an_image_beside_the_document() {
+        let dir = TempDir::new("img").unwrap();
+        let doc = dir.path().join("note.md");
+        fs::write(&doc, "").unwrap();
+        let beside = dir.path().join("plot.png");
+        fs::write(&beside, b"png").unwrap();
+        let kept = import_image_file(doc.to_string_lossy().into(), beside.to_string_lossy().into()).unwrap();
+        assert_eq!(kept, "plot.png");
+
+        let outside = TempDir::new("img-out").unwrap();
+        let src = outside.path().join("shot.png");
+        fs::write(&src, b"shot").unwrap();
+        let copied = import_image_file(doc.to_string_lossy().into(), src.to_string_lossy().into()).unwrap();
+        assert_eq!(copied, "shot.png");
+        assert_eq!(fs::read(dir.path().join("shot.png")).unwrap(), b"shot");
+
+        let pasted = save_image_beside_doc(
+            doc.to_string_lossy().into(),
+            base64::engine::general_purpose::STANDARD.encode(b"paste"),
+            "png".into(),
+        )
+        .unwrap();
+        assert_eq!(pasted, "mdpad-image-1.png");
+        assert_eq!(fs::read(dir.path().join(&pasted)).unwrap(), b"paste");
     }
 
     #[test]

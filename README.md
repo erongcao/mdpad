@@ -4,7 +4,7 @@
 
 A native macOS Markdown writing desk. CodeMirror 6 for editing, an AI writing assistant, locally executable code blocks, and pandoc export. The shell is Tauri 2, about 6 MB, with no bundled Chromium or Node runtime.
 
-Current version: **1.1.1**.
+Current version: **1.1.2**.
 
 ![mdpad — split view with AI panel](docs/screenshots/main.png)
 
@@ -17,8 +17,15 @@ mdpad is built around one loop: write, let AI help, run your code, export the re
 - Code blocks: run Python, R, or Julia locally. Output and plots stay under the block. On error, AI can patch the block in place
 - Ghost-text completion inside code fences (Tab to accept, Esc to dismiss)
 - Export: Word and standalone HTML via pandoc, PDF via the system print dialog, one-click copy styled for the WeChat Official Account editor
-- Privacy: the file stays on disk. API keys stay in the macOS Keychain. Remote images in the preview are not fetched
+- Privacy: the file stays on disk. API keys stay in the macOS Keychain. The preview shows local images beside the document. Remote images are not fetched
 - Updates: signed updates from GitHub Releases (mdpad menu → 检查更新). After a crash, a banner offers to restore unsaved work
+
+## What changed in 1.1.2
+
+- While the crash-recovery banner is up, opening another file, creating a new one, or typing does not overwrite or delete that snapshot. Restore loads it. Discard deletes it. After a discard, edits already made in the current document start being snapshotted again
+- The preview shows local images from the document’s folder: relative paths, absolute paths, and `file://`. They are read and shown as data URIs. A missing file, a file over 15 MB, or an unsaved document shows the path as text
+- Pasting a screenshot into the editor, or dropping a png, jpg, gif, webp, or svg onto the window, saves the file beside the document and inserts `![](...)`. A file that is already in the document folder is linked by its relative path
+- Format → Image still inserts the `![描述](路径)` placeholder. Paste or drop to put a real file next to the document
 
 ## What changed in 1.1.1
 
@@ -53,7 +60,7 @@ Every item toggles. Press it again to remove the mark.
 - Headings 1–3 (⌃⌘1/2/3), quote, code block (⌥⌘C), horizontal rule
 - Bold ⌘B, italic ⌘I, strikethrough ⇧⌘X, inline code ⇧⌘C
 - Bullet, numbered, and task lists (⇧⌘7/8/9)
-- Link ⌘K, image, table template (⇧⌘T), automatic footnotes
+- Link ⌘K, image placeholder, table template (⇧⌘T), automatic footnotes. Pasting or dropping an image saves it beside the document
 - Inside a table: hover toolbar for rows and columns. Tab moves between cells and appends a row at the end
 
 ## AI writing
@@ -117,7 +124,7 @@ File → 导出:
 ## Privacy
 
 - The file on disk is not uploaded. An AI call sends the selection, or the document text you attached (capped at 20,000 characters), plus the conversation you already started
-- Remote images (`http://`, `https://`, protocol-relative) are not loaded in the preview, chat, or AI drawer
+- The preview shows local images from the document folder. Remote images (`http://`, `https://`, protocol-relative) in the preview, chat, and AI drawer are not requested. The address is shown as text
 - API keys live in the macOS Keychain under the service `com.yirongcao.mdpad`. The config file stores the base URL and model name only: `~/Library/Application Support/mdpad/ai-config.json`
 - A key is attached to a request only when the URL matches the saved provider URL, or the URL you just allowed by fetching the model list
 - Crash snapshots, the recent-file list, and `mdpad.log` are in the same Application Support folder. The log records key length, not the key
@@ -162,7 +169,7 @@ npm run tauri build  # release bundle in src-tauri/target/release/bundle/
 A signed update build, when `~/.tauri/mdpad.key` is present:
 
 ```bash
-scripts/release.sh 1.1.1 "notes"
+scripts/release.sh 1.1.2 "notes"
 ```
 
 ## Tech stack

@@ -1,8 +1,8 @@
 mdpad — 使用说明 / Notes
 ===========================
 
-macOS Markdown 写作台，版本 1.1.1。
-A macOS Markdown desk. Version 1.1.1.
+macOS Markdown 写作台，版本 1.1.2。
+A macOS Markdown desk. Version 1.1.2.
 
 安装 / Install
 --------------

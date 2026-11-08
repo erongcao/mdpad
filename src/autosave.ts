@@ -6,8 +6,15 @@ import { view, setDoc, markDirty, getCurrentPath, isDirty, inTauri } from "./mai
  * - 停手 0.8 秒落快照；连续打字最多 2 秒也落一次
  * - 写和删排成一队，保存完成后的清除不会被还在飞的快照盖回去
  * - 关闭窗口前再刷一次，正常退出不丢最后一次按键
+ * - 恢复横幅还在时，打开、新建、打字都不覆盖也不删除那份快照
  * - Tauri 内走 Rust 原子写文件；浏览器 dev 环境退到 localStorage
  */
+
+/**
+ * pending：还没读完上次的快照，先不写也不删。
+ * held：横幅还在，快照只等用户恢复或丢弃。
+ */
+let recoveryGate: "pending" | "held" | "off" = "pending";
 
 const KEY = "mdpad.autosave.v1";
 const DEBOUNCE_MS = 800;
@@ -45,6 +52,7 @@ export function scheduleAutosave(): void {
 }
 
 async function writeSnapshot(): Promise<void> {
+  if (recoveryGate !== "off") return;
   if (!isDirty()) {
     await clearBody();
     return;
@@ -54,6 +62,7 @@ async function writeSnapshot(): Promise<void> {
     content: view.state.doc.toString(),
     ts: Date.now(),
   };
+  if (recoveryGate !== "off") return;
   if (!isDirty()) {
     await clearBody();
     return;
@@ -93,6 +102,7 @@ export function clearAutosave(): Promise<void> {
   window.clearTimeout(timer);
   timer = undefined;
   burstAt = undefined;
+  if (recoveryGate !== "off") return Promise.resolve();
   return enqueue(clearBody);
 }
 
@@ -131,9 +141,18 @@ async function loadSnapshot(): Promise<Snapshot | null> {
 }
 
 export async function initAutosaveRecovery(): Promise<void> {
-  const snap = await loadSnapshot();
-  if (!snap) return;
-  showBanner(snap);
+  try {
+    const snap = await loadSnapshot();
+    if (!snap) {
+      recoveryGate = "off";
+      if (isDirty()) void flushAutosave();
+      return;
+    }
+    recoveryGate = "held";
+    showBanner(snap);
+  } catch {
+    recoveryGate = "off";
+  }
 }
 
 function showBanner(snap: Snapshot): void {
@@ -150,6 +169,7 @@ function showBanner(snap: Snapshot): void {
   restore.textContent = "恢复";
   restore.className = "primary";
   restore.addEventListener("click", () => {
+    recoveryGate = "off";
     setDoc(snap.content, snap.path);
     markDirty();
     void flushAutosave();
@@ -159,7 +179,10 @@ function showBanner(snap: Snapshot): void {
   const discard = document.createElement("button");
   discard.textContent = "丢弃";
   discard.addEventListener("click", () => {
-    void clearAutosave();
+    recoveryGate = "off";
+    void clearAutosave().then(() => {
+      if (isDirty()) void flushAutosave();
+    });
     bar.remove();
   });
 

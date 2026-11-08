@@ -28,6 +28,7 @@ import { focusCompartment, initialFocusExtension } from "./focus";
 import { attachRunButtons, initRunner } from "./runner";
 import { completionExtension, initCompletionToggle } from "./complete";
 import { scheduleAutosave, clearAutosave, flushAutosave, initAutosaveRecovery } from "./autosave";
+import { hydrateLocalImages, importDroppedImages, initImageInput } from "./images";
 import { scheduleAutoUpdateCheck } from "./updater";
 
 export const md = createMarkdown({ typographer: true });
@@ -200,6 +201,7 @@ export function renderPreview() {
   previewEl.innerHTML = md.render(view.state.doc.toString());
   attachRunButtons(previewEl);
   restoreAnchor(scroller, anchor);
+  void hydrateLocalImages(previewEl);
 }
 
 function schedulePreview() {
@@ -359,7 +361,13 @@ if (inTauri) {
   });
   void getCurrentWebview().onDragDropEvent(async (event) => {
     if (event.payload.type !== "drop") return;
-    const path = event.payload.paths.find((p) => /\.(md|markdown|mdown|txt)$/i.test(p));
+    const paths = event.payload.paths;
+    const path = paths.find((p) => /\.(md|markdown|mdown|txt)$/i.test(p));
+    const images = paths.filter((p) => /\.(png|jpe?g|gif|webp|svg)$/i.test(p));
+    if (!path && images.length) {
+      await importDroppedImages(images);
+      return;
+    }
     if (!path) return;
     if (dirty) {
       if (!confirm("当前文档还没保存，继续会丢失修改。继续？")) return;
@@ -456,4 +464,5 @@ initTables();
 initRunner();
 initCompletionToggle();
 initAutosaveRecovery();
+initImageInput();
 scheduleAutoUpdateCheck();
