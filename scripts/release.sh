@@ -17,7 +17,7 @@ hdiutil info | grep -q "mdpad" && { echo "检测到残留 dmg 挂载，先弹出
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY_FILE")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 
-echo "== 构建 v$VERSION（带 updater 签名）=="
+echo "== 构建 v${VERSION}（带 updater 签名）=="
 npm run tauri build
 
 BUNDLE="src-tauri/target/release/bundle"
