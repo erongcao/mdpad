@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import MarkdownIt from "markdown-it";
+import { createMarkdown } from "./markdown";
 import { view, inTauri } from "./main";
 
-const md = new MarkdownIt({ html: false, linkify: true });
+const md = createMarkdown();
 
 interface ProviderConfig {
   base_url: string;
@@ -70,8 +70,23 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function renderAll() {
+function nearBottom(box: HTMLElement): boolean {
+  return box.scrollHeight - box.scrollTop - box.clientHeight < 64;
+}
+
+function streamingHtml(m: ChatMsg): string {
+  const reasoning = m.reasoning
+    ? '<div class="chat-reasoning chat-stream-text">' + escapeHtml(m.reasoning) + "</div>"
+    : "";
+  const body = m.content
+    ? '<div class="chat-stream-text">' + escapeHtml(m.content) + "</div>"
+    : '<span class="chat-typing">思考中…</span>';
+  return reasoning + body;
+}
+
+function renderAll(forceScroll = false) {
   const box = el("#chat-messages");
+  const stick = forceScroll || nearBottom(box);
   if (!messages.length) {
     box.innerHTML = '<div class="chat-empty">选中文字后可以直接问，比如「这段写得通顺吗」</div>';
     return;
@@ -81,18 +96,33 @@ function renderAll() {
       if (m.role === "user") {
         return '<div class="chat-msg user"><div class="bubble">' + escapeHtml(m.display ?? m.content) + "</div></div>";
       }
-      const reasoning = m.reasoning
+      const live = streaming && i === messages.length - 1;
+      const reasoning = !live && m.reasoning
         ? '<div class="chat-reasoning">' + md.render(m.reasoning) + "</div>"
         : "";
-      const body = m.content ? md.render(m.content) : '<span class="chat-typing">思考中…</span>';
+      const body = live ? streamingHtml(m) : m.content ? md.render(m.content) : '<span class="chat-typing">思考中…</span>';
       const actions =
         m.content && !streaming
           ? '<div class="chat-msg-actions"><button data-insert="' + i + '">插入到光标处</button><button data-copy="' + i + '">复制</button></div>'
           : "";
-      return '<div class="chat-msg assistant"><div class="bubble markdown-body">' + reasoning + body + "</div>" + actions + "</div>";
+      const klass = live ? "chat-msg assistant streaming" : "chat-msg assistant";
+      return '<div class="' + klass + '"><div class="bubble markdown-body">' + reasoning + body + "</div>" + actions + "</div>";
     })
     .join("");
-  box.scrollTop = box.scrollHeight;
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+
+function paintStreaming() {
+  const box = el("#chat-messages");
+  const stick = nearBottom(box);
+  const last = messages[messages.length - 1];
+  const bubble = box.querySelector<HTMLElement>(".chat-msg.assistant.streaming .bubble");
+  if (!last || last.role !== "assistant" || !bubble) {
+    renderAll();
+    return;
+  }
+  bubble.innerHTML = streamingHtml(last);
+  if (stick) box.scrollTop = box.scrollHeight;
 }
 
 /* ---------------- 事件流 ---------------- */
@@ -106,10 +136,10 @@ async function ensureListener() {
     if (!last || last.role !== "assistant") return;
     if (p.kind === "chunk" && p.text) {
       last.content += p.text;
-      renderAll();
+      paintStreaming();
     } else if (p.kind === "reasoning" && p.text) {
       last.reasoning = (last.reasoning ?? "") + p.text;
-      renderAll();
+      paintStreaming();
     } else if (p.kind === "done") {
       streaming = false;
       el("#chat-stop").hidden = true;
@@ -154,7 +184,7 @@ async function send() {
   streamId = "chat-" + Date.now();
   el("#chat-stop").hidden = false;
   el<HTMLButtonElement>("#chat-send").disabled = true;
-  renderAll();
+  renderAll(true);
   await ensureListener();
 
   const apiMessages = [

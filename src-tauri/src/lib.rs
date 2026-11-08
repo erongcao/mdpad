@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use futures_util::StreamExt;
@@ -14,14 +15,49 @@ fn read_text_file(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| format!("读取失败：{e}"))
 }
 
+fn next_id() -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn parent_dir(path: &Path) -> &Path {
+    match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    }
+}
+
+/// 先写入同目录临时文件并 fsync，再改名。崩溃不会把目标文件截成半截。
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = parent_dir(path);
+    if parent != Path::new(".") && !parent.exists() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
+    }
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), next_id()));
+    let write_result = (|| -> Result<(), String> {
+        let mut file = File::create(&tmp).map_err(|e| format!("写入失败：{e}"))?;
+        file.write_all(bytes).map_err(|e| format!("写入失败：{e}"))?;
+        file.sync_all().map_err(|e| format!("写入失败：{e}"))?;
+        Ok(())
+    })();
+    if let Err(err) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(err);
+    }
+    if let Err(err) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("保存失败：{err}"));
+    }
+    if let Ok(dir) = File::open(parent) {
+        let _ = dir.sync_all();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    if let Some(parent) = Path::new(&path).parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
-        }
-    }
-    fs::write(&path, contents).map_err(|e| format!("保存失败：{e}"))
+    atomic_write(Path::new(&path), contents.as_bytes())
 }
 
 
@@ -38,14 +74,7 @@ fn autosave_path() -> PathBuf {
 
 #[tauri::command]
 fn autosave_write(contents: String) -> Result<(), String> {
-    let p = autosave_path();
-    if let Some(parent) = p.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
-    }
-    // 原子写：先写临时文件再改名，崩溃时不会留下半截文件
-    let tmp = p.with_extension("json.tmp");
-    fs::write(&tmp, contents).map_err(|e| format!("快照写入失败：{e}"))?;
-    fs::rename(&tmp, &p).map_err(|e| format!("快照改名失败：{e}"))
+    atomic_write(&autosave_path(), contents.as_bytes()).map_err(|e| format!("快照{e}"))
 }
 
 #[tauri::command]
@@ -165,10 +194,56 @@ fn ai_set_config(mut config: AiConfig) -> Result<(), String> {
     fs::write(&path, text).map_err(|e| format!("保存配置失败：{e}"))
 }
 
+fn normalize_base_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
+}
+
+/// 只允许 http/https。密钥只发给已经写入配置的那个地址，避免页面把钥匙串密钥转到别的主机。
+fn validate_base_url(base_url: &str) -> Result<String, String> {
+    let trimmed = base_url.trim();
+    let url = reqwest::Url::parse(trimmed).map_err(|_| "服务地址无效".to_string())?;
+    match url.scheme() {
+        "http" | "https" => {}
+        _ => return Err("服务地址只允许 http 或 https".into()),
+    }
+    if url.host_str().unwrap_or("").is_empty() {
+        return Err("服务地址无效".into());
+    }
+    Ok(normalize_base_url(trimmed))
+}
+
+/// 设置页「拉取模型」时眼前的地址还没点保存。只在内存里放行这一次，不写配置文件。
+static ALLOWED_URLS: LazyLock<Mutex<HashMap<String, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[tauri::command]
+fn ai_allow_base_url(provider: String, base_url: String) -> Result<(), String> {
+    let base_url = validate_base_url(&base_url)?;
+    ALLOWED_URLS.lock().unwrap().insert(provider, base_url);
+    Ok(())
+}
+
+fn api_key_for_saved_url(provider: &str, base_url: &str) -> String {
+    let wanted = normalize_base_url(base_url);
+    let cfg = ai_get_config();
+    let saved = cfg
+        .providers
+        .get(provider)
+        .map(|p| normalize_base_url(&p.base_url))
+        .filter(|s| !s.is_empty());
+    let allowed = ALLOWED_URLS.lock().unwrap().get(provider).cloned();
+    if saved.as_deref() != Some(wanted.as_str()) && allowed.as_deref() != Some(wanted.as_str()) {
+        log_line(&format!("未把钥匙串密钥发给未保存的地址 provider={provider}"));
+        return String::new();
+    }
+    keychain_get(provider)
+}
+
 #[tauri::command]
 async fn ai_list_models(base_url: String, provider: String) -> Result<Vec<String>, String> {
-    let api_key = keychain_get(&provider);
-    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let base_url = validate_base_url(&base_url)?;
+    let api_key = api_key_for_saved_url(&provider, &base_url);
+    let url = format!("{base_url}/models");
     log_line(&format!(
         "list_models 请求: provider={provider} url={url} key_len={}",
         api_key.len()
@@ -234,9 +309,10 @@ async fn ai_chat_stream(
     model: String,
     messages: Vec<ChatMessage>,
 ) -> Result<(), String> {
+    let base_url = validate_base_url(&base_url)?;
     let cancel = Arc::new(AtomicBool::new(false));
     CANCELS.lock().unwrap().insert(id.clone(), cancel.clone());
-    let api_key = keychain_get(&provider);
+    let api_key = api_key_for_saved_url(&provider, &base_url);
     log_line(&format!(
         "chat 请求: provider={provider} model={model} key_len={} base={base_url}",
         api_key.len()
@@ -282,6 +358,7 @@ async fn run_stream(
 
     let mut stream = resp.bytes_stream();
     let mut buf = String::new();
+    let mut pending = Vec::new();
     let mut finished = false;
 
     while let Some(chunk) = stream.next().await {
@@ -290,39 +367,20 @@ async fn run_stream(
             return Ok(());
         }
         let chunk = chunk.map_err(|e| format!("读取流失败：{e}"))?;
-        buf.push_str(&String::from_utf8_lossy(&chunk));
-
-        while let Some(pos) = buf.find('\n') {
-            let line: String = buf[..pos].trim().to_string();
-            buf.drain(..=pos);
-            if line.is_empty() || !line.starts_with("data:") {
-                continue;
-            }
-            let data = line[5..].trim();
-            if data == "[DONE]" {
-                finished = true;
-                break;
-            }
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
-                continue;
-            };
-            let delta = &v["choices"][0]["delta"];
-            if let Some(text) = delta["content"].as_str() {
-                if !text.is_empty() {
-                    emit(app, serde_json::json!({"id": id, "kind": "chunk", "text": text}));
-                }
-            }
-            if let Some(reasoning) = delta["reasoning"]
-                .as_str()
-                .or_else(|| delta["reasoning_content"].as_str())
-            {
-                if !reasoning.is_empty() {
-                    emit(app, serde_json::json!({"id": id, "kind": "reasoning", "text": reasoning}));
-                }
-            }
-        }
-        if finished {
+        append_utf8(&mut buf, &mut pending, &chunk);
+        if drain_sse(app, id, &mut buf) {
+            finished = true;
             break;
+        }
+    }
+    if !finished {
+        if !pending.is_empty() {
+            buf.push('\u{FFFD}');
+            pending.clear();
+        }
+        if !buf.is_empty() {
+            buf.push('\n');
+            let _ = drain_sse(app, id, &mut buf);
         }
     }
 
@@ -330,41 +388,121 @@ async fn run_stream(
     Ok(())
 }
 
+/// 网络块可能把一个汉字拆开。未完成的 UTF-8 字节留到下一块，不再各自 lossy 解码。
+fn append_utf8(text: &mut String, pending: &mut Vec<u8>, chunk: &[u8]) {
+    pending.extend_from_slice(chunk);
+    while !pending.is_empty() {
+        match std::str::from_utf8(pending) {
+            Ok(s) => {
+                text.push_str(s);
+                pending.clear();
+                break;
+            }
+            Err(err) => {
+                let valid = err.valid_up_to();
+                if valid > 0 {
+                    text.push_str(std::str::from_utf8(&pending[..valid]).unwrap());
+                    pending.drain(..valid);
+                    continue;
+                }
+                match err.error_len() {
+                    None => break,
+                    Some(len) => {
+                        text.push('\u{FFFD}');
+                        pending.drain(..len.min(pending.len()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SseDelta {
+    done: bool,
+    content: String,
+    reasoning: String,
+}
+
+fn parse_sse_data(data: &str) -> SseDelta {
+    if data == "[DONE]" {
+        return SseDelta {
+            done: true,
+            content: String::new(),
+            reasoning: String::new(),
+        };
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
+        return SseDelta {
+            done: false,
+            content: String::new(),
+            reasoning: String::new(),
+        };
+    };
+    let delta = &value["choices"][0]["delta"];
+    let content = delta["content"].as_str().unwrap_or("").to_string();
+    let reasoning = delta["reasoning"]
+        .as_str()
+        .or_else(|| delta["reasoning_content"].as_str())
+        .unwrap_or("")
+        .to_string();
+    SseDelta {
+        done: false,
+        content,
+        reasoning,
+    }
+}
+
+fn drain_sse(app: &AppHandle, id: &str, buf: &mut String) -> bool {
+    while let Some(pos) = buf.find('\n') {
+        let line: String = buf[..pos].trim().to_string();
+        buf.drain(..=pos);
+        if line.is_empty() || !line.starts_with("data:") {
+            continue;
+        }
+        let delta = parse_sse_data(line[5..].trim());
+        if delta.done {
+            return true;
+        }
+        if !delta.content.is_empty() {
+            emit(
+                app,
+                serde_json::json!({"id": id, "kind": "chunk", "text": delta.content}),
+            );
+        }
+        if !delta.reasoning.is_empty() {
+            emit(
+                app,
+                serde_json::json!({"id": id, "kind": "reasoning", "text": delta.reasoning}),
+            );
+        }
+    }
+    false
+}
+
 
 
 /* ---------------- 钥匙串（走 security CLI，读写同一条路径，无授权弹窗） ---------------- */
 
 const KEYCHAIN_SERVICE: &str = "com.yirongcao.mdpad";
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
 fn keychain_account(provider: &str) -> String {
     format!("ai-api-key-{provider}")
 }
 
 fn keychain_get(provider: &str) -> String {
-    let out = std::process::Command::new("security")
-        .args([
-            "find-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            &keychain_account(provider),
-            "-w",
-        ])
-        .output();
-    match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+    // Security 框架读写，密钥不出现在进程参数里
+    match security_framework::passwords::get_generic_password(
+        KEYCHAIN_SERVICE,
+        &keychain_account(provider),
+    ) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes)
             .trim_end_matches(['\r', '\n'])
             .to_string(),
-        Ok(o) => {
-            // 本地服务商本来就没有 key，"找不到" 是常态不记日志
-            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            if !err.contains("could not be found") {
+        Err(err) => {
+            if err.code() != ERR_SEC_ITEM_NOT_FOUND {
                 log_line(&format!("keychain 读取失败 provider={provider}: {err}"));
             }
-            String::new()
-        }
-        Err(e) => {
-            log_line(&format!("security CLI 调用失败: {e}"));
             String::new()
         }
     }
@@ -378,48 +516,38 @@ fn ai_has_api_key(provider: String) -> bool {
 #[tauri::command]
 fn ai_set_api_key(provider: String, key: String) -> Result<(), String> {
     let trimmed = key.trim().to_string();
-    let out = std::process::Command::new("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            &keychain_account(&provider),
-            "-w",
-            &trimmed,
-        ])
-        .output()
-        .map_err(|e| format!("调用 security 失败：{e}"))?;
-    if out.status.success() {
-        log_line(&format!(
-            "set_api_key: provider={provider} key_len={} ok",
-            trimmed.len()
-        ));
-        Ok(())
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        log_line(&format!("set_api_key: provider={provider} 失败: {err}"));
-        Err(format!("写入钥匙串失败：{err}"))
+    match security_framework::passwords::set_generic_password(
+        KEYCHAIN_SERVICE,
+        &keychain_account(&provider),
+        trimmed.as_bytes(),
+    ) {
+        Ok(()) => {
+            log_line(&format!(
+                "set_api_key: provider={provider} key_len={} ok",
+                trimmed.len()
+            ));
+            Ok(())
+        }
+        Err(err) => {
+            log_line(&format!("set_api_key: provider={provider} 失败: {err}"));
+            Err(format!("写入钥匙串失败：{err}"))
+        }
     }
 }
 
 #[tauri::command]
 fn ai_delete_api_key(provider: String) -> Result<(), String> {
-    let out = std::process::Command::new("security")
-        .args([
-            "delete-generic-password",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            &keychain_account(&provider),
-        ])
-        .output()
-        .map_err(|e| format!("调用 security 失败：{e}"))?;
-    if out.status.success() {
-        log_line(&format!("delete_api_key: provider={provider} ok"));
+    match security_framework::passwords::delete_generic_password(
+        KEYCHAIN_SERVICE,
+        &keychain_account(&provider),
+    ) {
+        Ok(()) => {
+            log_line(&format!("delete_api_key: provider={provider} ok"));
+            Ok(())
+        }
+        Err(err) if err.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+        Err(err) => Err(format!("删除钥匙串失败：{err}")),
     }
-    Ok(())
 }
 
 /* ---------------- Pandoc 导出 ---------------- */
@@ -485,8 +613,9 @@ fn pandoc_export(
 ) -> Result<String, String> {
     let pandoc = find_pandoc().ok_or("未找到 pandoc，请先安装：brew install pandoc")?;
 
-    // 源文写进临时文件，让 pandoc 读真实文件（图片相对路径才有着落）
-    let tmp = std::env::temp_dir().join(format!("mdpad-export-{}.md", std::process::id()));
+    // 源文写进独立临时目录，让 pandoc 读真实文件（图片相对路径才有着落）
+    let scratch = TempDir::new("export")?;
+    let tmp = scratch.path().join("source.md");
     fs::write(&tmp, &source).map_err(|e| format!("写临时文件失败：{e}"))?;
 
     let mut cmd = std::process::Command::new(&pandoc);
@@ -515,7 +644,7 @@ fn pandoc_export(
     }
 
     let out = cmd.output().map_err(|e| format!("启动 pandoc 失败：{e}"))?;
-    let _ = fs::remove_file(&tmp);
+    drop(scratch);
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -604,84 +733,230 @@ struct RunResult {
     images: Vec<String>, // base64 data URI
 }
 
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(prefix: &str) -> Result<Self, String> {
+        let dir = std::env::temp_dir().join(format!(
+            "mdpad-{prefix}-{}-{}",
+            std::process::id(),
+            next_id()
+        ));
+        fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
+        Ok(Self(dir))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+const MAX_CAPTURE: usize = 256 * 1024;
+
+struct Captured {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    timed_out: bool,
+    duration_ms: u128,
+}
+
+fn push_capped(kept: &mut Vec<u8>, truncated: &mut bool, data: &[u8], cap: usize) {
+    if kept.len() >= cap {
+        *truncated = true;
+        return;
+    }
+    let room = cap - kept.len();
+    if data.len() > room {
+        kept.extend_from_slice(&data[..room]);
+        *truncated = true;
+    } else {
+        kept.extend_from_slice(data);
+    }
+}
+
+fn decode_captured(bytes: &[u8], truncated: bool) -> String {
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    if truncated {
+        text.push_str("\n…（输出过长，已截断）");
+    }
+    text
+}
+
+async fn drain_rest(
+    mut reader: impl tokio::io::AsyncRead + Unpin,
+    kept: &mut Vec<u8>,
+    truncated: &mut bool,
+) {
+    let mut buf = [0u8; 8192];
+    loop {
+        match tokio::io::AsyncReadExt::read(&mut reader, &mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => push_capped(kept, truncated, &buf[..n], MAX_CAPTURE),
+        }
+    }
+}
+
+/// 超时后先发 SIGKILL 并等待进程退出，再让调用方删临时目录。
+async fn run_captured(
+    program: &str,
+    args: &[String],
+    dir: &Path,
+    timeout: std::time::Duration,
+) -> Result<Captured, String> {
+    let started = std::time::Instant::now();
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("运行失败：{e}"))?;
+    let mut stdout = child.stdout.take().ok_or("无法读取标准输出")?;
+    let mut stderr = child.stderr.take().ok_or("无法读取标准错误")?;
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut out_kept = Vec::new();
+    let mut err_kept = Vec::new();
+    let mut out_trunc = false;
+    let mut err_trunc = false;
+    let mut out_buf = [0u8; 8192];
+    let mut err_buf = [0u8; 8192];
+    let mut out_done = false;
+    let mut err_done = false;
+
+    let status = loop {
+        tokio::select! {
+            biased;
+            res = child.wait() => {
+                break res.map_err(|e| format!("运行失败：{e}"))?;
+            }
+            n = tokio::io::AsyncReadExt::read(&mut stdout, &mut out_buf), if !out_done => {
+                match n {
+                    Ok(0) | Err(_) => out_done = true,
+                    Ok(n) => push_capped(&mut out_kept, &mut out_trunc, &out_buf[..n], MAX_CAPTURE),
+                }
+            }
+            n = tokio::io::AsyncReadExt::read(&mut stderr, &mut err_buf), if !err_done => {
+                match n {
+                    Ok(0) | Err(_) => err_done = true,
+                    Ok(n) => push_capped(&mut err_kept, &mut err_trunc, &err_buf[..n], MAX_CAPTURE),
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                let _ = child.start_kill();
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+                return Ok(Captured {
+                    stdout: String::new(),
+                    stderr: format!("运行超时（{} 秒上限），进程已终止", timeout.as_secs()),
+                    exit_code: -1,
+                    timed_out: true,
+                    duration_ms: started.elapsed().as_millis(),
+                });
+            }
+        }
+    };
+
+    if !out_done {
+        drain_rest(stdout, &mut out_kept, &mut out_trunc).await;
+    }
+    if !err_done {
+        drain_rest(stderr, &mut err_kept, &mut err_trunc).await;
+    }
+
+    Ok(Captured {
+        stdout: decode_captured(&out_kept, out_trunc),
+        stderr: decode_captured(&err_kept, err_trunc),
+        exit_code: status.code().unwrap_or(-1),
+        timed_out: false,
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+fn image_mime(name: &str) -> Option<&'static str> {
+    if name.ends_with(".svg") {
+        Some("image/svg+xml")
+    } else if name.ends_with(".png") {
+        Some("image/png")
+    } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+        Some("image/jpeg")
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 async fn run_code(lang: String, code: String) -> Result<RunResult, String> {
     let Some(interp) = find_interpreter(&lang) else {
         return Err(format!("未找到 {lang} 解释器"));
     };
-    let started = std::time::Instant::now();
-
-    // 每次运行一个独立临时目录，运行后扫描新生成的图片
-    let dir = std::env::temp_dir().join(format!("mdpad-run-{}-{}", std::process::id(), started.elapsed().as_nanos()));
-    fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败：{e}"))?;
+    let dir = TempDir::new("run")?;
     let ext = match lang.as_str() {
         "python" | "python3" => "py",
         "r" | "rscript" => "R",
         "julia" => "jl",
         _ => "txt",
     };
-    let script = dir.join(format!("script.{ext}"));
+    let script = dir.path().join(format!("script.{ext}"));
     fs::write(&script, &code).map_err(|e| format!("写脚本失败：{e}"))?;
 
-    let run = tokio::process::Command::new(&interp)
-        .arg(&script)
-        .current_dir(&dir)
-        .output();
-    let result = match tokio::time::timeout(std::time::Duration::from_secs(120), run).await {
-        Ok(r) => r.map_err(|e| format!("运行失败：{e}"))?,
-        Err(_) => {
-            log_line(&format!("run_code 超时: lang={lang}"));
-            let _ = fs::remove_dir_all(&dir);
-            return Ok(RunResult {
-                stdout: String::new(),
-                stderr: "运行超时（120 秒上限），进程已终止".into(),
-                exit_code: -1,
-                duration_ms: 120000,
-                timed_out: true,
-                images: vec![],
-            });
-        }
-    };
+    let captured = run_captured(
+        &interp,
+        &[script.to_string_lossy().to_string()],
+        dir.path(),
+        std::time::Duration::from_secs(120),
+    )
+    .await?;
+    if captured.timed_out {
+        log_line(&format!("run_code 超时: lang={lang}"));
+        return Ok(RunResult {
+            stdout: captured.stdout,
+            stderr: captured.stderr,
+            exit_code: -1,
+            duration_ms: captured.duration_ms,
+            timed_out: true,
+            images: vec![],
+        });
+    }
 
-    // 收集运行目录里新生成的图片，转 base64 后清目录
     let mut images = Vec::new();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_lowercase();
-            let is_img = ["png", "jpg", "jpeg", "svg"]
-                .iter()
-                .any(|ext| name.ends_with(&format!(".{ext}")));
-            if !is_img || name.starts_with("script.") {
+    if let Ok(entries) = fs::read_dir(dir.path()) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name.starts_with("script.") {
                 continue;
             }
-            if let Ok(bytes) = fs::read(e.path()) {
-                if bytes.len() > 5_000_000 {
-                    continue;
-                }
-                let mime = if name.ends_with(".svg") { "image/svg+xml" } else { "image/png" };
-                use base64::Engine;
-                images.push(format!(
-                    "data:{mime};base64,{}",
-                    base64::engine::general_purpose::STANDARD.encode(&bytes)
-                ));
+            let Some(mime) = image_mime(&name) else { continue };
+            let Ok(bytes) = fs::read(entry.path()) else { continue };
+            if bytes.len() > 5_000_000 {
+                continue;
             }
+            use base64::Engine;
+            images.push(format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&bytes)
+            ));
         }
     }
-    let _ = fs::remove_dir_all(&dir);
 
-    let duration_ms = started.elapsed().as_millis();
-    let stdout = String::from_utf8_lossy(&result.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&result.stderr).to_string();
-    let exit_code = result.status.code().unwrap_or(-1);
     log_line(&format!(
-        "run_code: lang={lang} exit={exit_code} {duration_ms}ms images={}",
+        "run_code: lang={lang} exit={} {}ms images={}",
+        captured.exit_code,
+        captured.duration_ms,
         images.len()
     ));
     Ok(RunResult {
-        stdout,
-        stderr,
-        exit_code,
-        duration_ms,
+        stdout: captured.stdout,
+        stderr: captured.stderr,
+        exit_code: captured.exit_code,
+        duration_ms: captured.duration_ms,
         timed_out: false,
         images,
     })
@@ -701,65 +976,69 @@ async fn run_check(lang: String, code: String) -> Result<CheckResult, String> {
     let Some(interp) = find_interpreter(&lang) else {
         return Err(format!("未找到 {lang} 解释器"));
     };
-    let started = std::time::Instant::now();
-    let dir = std::env::temp_dir().join(format!("mdpad-check-{}", std::process::id()));
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-
-    let (file, args): (String, Vec<String>) = match lang.as_str() {
+    let dir = TempDir::new("check")?;
+    let script_path = |name: &str| dir.path().join(name);
+    let quote = |path: &Path| path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let args: Vec<String> = match lang.as_str() {
         "python" | "python3" => {
-            let f = dir.join("check.py");
-            fs::write(&f, &code).map_err(|e| e.to_string())?;
-            (String::new(), vec!["-m".into(), "py_compile".into(), f.to_string_lossy().to_string()])
+            let file = script_path("check.py");
+            fs::write(&file, &code).map_err(|e| e.to_string())?;
+            vec!["-m".into(), "py_compile".into(), file.to_string_lossy().to_string()]
         }
         "r" | "rscript" => {
-            let f = dir.join("check.R");
-            fs::write(&f, &code).map_err(|e| e.to_string())?;
-            (String::new(), vec!["-e".into(), format!("invisible(parse(file=\"{}\"))", f.to_string_lossy())])
+            let file = script_path("check.R");
+            fs::write(&file, &code).map_err(|e| e.to_string())?;
+            vec!["-e".into(), format!("invisible(parse(file=\"{}\"))", quote(&file))]
         }
         "julia" => {
-            let f = dir.join("check.jl");
-            fs::write(&f, &code).map_err(|e| e.to_string())?;
-            (String::new(), vec!["-e".into(), format!("Meta.parseall(read(\"{}\", String)); println(\"OK\")", f.to_string_lossy())])
+            let file = script_path("check.jl");
+            fs::write(&file, &code).map_err(|e| e.to_string())?;
+            vec![
+                "-e".into(),
+                format!("Meta.parseall(read(\"{}\", String)); println(\"OK\")", quote(&file)),
+            ]
         }
         _ => return Err("不支持的语言".into()),
     };
-    let _ = file;
 
-    let out = tokio::process::Command::new(&interp)
-        .args(&args)
-        .current_dir(&dir)
-        .output()
-        .await
-        .map_err(|e| format!("运行失败：{e}"))?;
-    let _ = fs::remove_dir_all(&dir);
-
-    let ok = out.status.success();
-    let message = if ok {
+    let captured = run_captured(&interp, &args, dir.path(), std::time::Duration::from_secs(30)).await?;
+    let ok = !captured.timed_out && captured.exit_code == 0;
+    let message = if captured.timed_out {
+        captured.stderr
+    } else if ok {
         "语法检查通过".to_string()
     } else {
-        // 清理报错：去掉临时文件路径和 R 的 "Error in ..." 包装，只留有效信息
-        let raw = String::from_utf8_lossy(&out.stderr);
+        let raw = if captured.stderr.trim().is_empty() {
+            captured.stdout
+        } else {
+            captured.stderr
+        };
         let mut cleaned = raw
-            .replace(&dir.to_string_lossy().to_string(), "代码")
+            .replace(&dir.path().to_string_lossy().to_string(), "代码")
             .replace("check.py", "代码")
             .replace("check.R", "代码")
             .replace("check.jl", "代码")
             .trim()
             .to_string();
         if let Some(pos) = cleaned.find(" : \n") {
-            // R 的 "Error in parse(...) : \n  细节" 结构
             cleaned = cleaned[pos + 5..].trim().to_string();
         }
         if let Some(stripped) = cleaned.strip_prefix("Error in parse") {
-            cleaned = stripped.trim_start_matches(['(', ')', ' ']).trim_start_matches("file").to_string();
+            cleaned = stripped
+                .trim_start_matches(['(', ')', ' '])
+                .trim_start_matches("file")
+                .to_string();
         }
         cleaned.chars().take(400).collect()
     };
-    log_line(&format!("run_check: lang={lang} ok={ok} msg={}", message.chars().take(120).collect::<String>()));
+    log_line(&format!(
+        "run_check: lang={lang} ok={ok} msg={}",
+        message.chars().take(120).collect::<String>()
+    ));
     Ok(CheckResult {
         ok,
         message,
-        duration_ms: started.elapsed().as_millis(),
+        duration_ms: captured.duration_ms,
     })
 }
 
@@ -1066,6 +1345,7 @@ pub fn run() {
             ai_get_config,
             ai_set_config,
             ai_list_models,
+            ai_allow_base_url,
             ai_chat_stream,
             ai_cancel,
             ai_has_api_key,
@@ -1101,4 +1381,104 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_survives_a_split_han_character() {
+        let bytes = "你".as_bytes();
+        assert_eq!(bytes, &[0xE4, 0xBD, 0xA0]);
+        let mut text = String::new();
+        let mut pending = Vec::new();
+        append_utf8(&mut text, &mut pending, &bytes[..1]);
+        assert_eq!(text, "");
+        append_utf8(&mut text, &mut pending, &bytes[1..2]);
+        assert_eq!(text, "");
+        append_utf8(&mut text, &mut pending, &bytes[2..]);
+        assert_eq!(text, "你");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn utf8_replaces_an_invalid_byte() {
+        let mut text = String::new();
+        let mut pending = Vec::new();
+        append_utf8(&mut text, &mut pending, &[0xFF, b'A']);
+        assert_eq!(text, "\u{FFFD}A");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn sse_delta_keeps_content() {
+        let delta = parse_sse_data(r#"{"choices":[{"delta":{"content":"你好","reasoning_content":"想"}}]}"#);
+        assert!(!delta.done);
+        assert_eq!(delta.content, "你好");
+        assert_eq!(delta.reasoning, "想");
+        assert!(parse_sse_data("[DONE]").done);
+    }
+
+    #[test]
+    fn image_mime_distinguishes_jpeg() {
+        assert_eq!(image_mime("plot.jpg"), Some("image/jpeg"));
+        assert_eq!(image_mime("plot.jpeg"), Some("image/jpeg"));
+        assert_eq!(image_mime("plot.png"), Some("image/png"));
+        assert_eq!(image_mime("plot.svg"), Some("image/svg+xml"));
+        assert_eq!(image_mime("notes.txt"), None);
+    }
+
+    #[test]
+    fn base_url_rejects_non_http() {
+        assert!(validate_base_url("file:///etc/passwd").is_err());
+        assert!(validate_base_url("http://").is_err());
+        assert_eq!(
+            validate_base_url("http://localhost:11434/v1/").unwrap(),
+            "http://localhost:11434/v1"
+        );
+    }
+
+    #[test]
+    fn atomic_write_replaces_the_whole_file() {
+        let dir = TempDir::new("test-write").unwrap();
+        let path = dir.path().join("note.md");
+        fs::write(&path, "old").unwrap();
+        atomic_write(&path, b"new content").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new content");
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn capture_cap_marks_truncation() {
+        let mut kept = Vec::new();
+        let mut truncated = false;
+        push_capped(&mut kept, &mut truncated, b"abcdef", 4);
+        assert_eq!(kept, b"abcd");
+        assert!(truncated);
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_the_child() {
+        let started = std::time::Instant::now();
+        let captured = run_captured(
+            "/bin/sleep",
+            &["30".into()],
+            Path::new("."),
+            std::time::Duration::from_millis(400),
+        )
+        .await
+        .unwrap();
+        assert!(captured.timed_out);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "elapsed {:?}",
+            started.elapsed()
+        );
+    }
 }

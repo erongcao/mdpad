@@ -812,7 +812,14 @@ pre:hover .code-actions { opacity: 1; }
 .code-fix-btn:hover { background: rgba(10, 132, 255, 0.08); }
 
 /* ---------- AI 幽灵补全 ---------- */
-.cm-ghost { color: var(--fg-dim); opacity: 0.55; }
+.cm-ghost {
+  color: var(--fg-dim);
+  opacity: 0.55;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+.ai-stream-text, .chat-stream-text { white-space: pre-wrap; word-break: break-word; }
+a.remote-img, span.remote-img { word-break: break-all; font-size: 0.92em; }
 
 #btn-completion { opacity: 0.55; }
 #btn-completion.active { opacity: 1; color: var(--accent); border-color: rgba(10,132,255,0.4); background: rgba(10,132,255,0.08); border-radius: 6px; }

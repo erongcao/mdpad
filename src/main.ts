@@ -14,7 +14,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import MarkdownIt from "markdown-it";
+import { createMarkdown } from "./markdown";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -27,10 +27,10 @@ import { tableKeymap, initTables } from "./tables";
 import { focusCompartment, initialFocusExtension } from "./focus";
 import { attachRunButtons, initRunner } from "./runner";
 import { completionExtension, initCompletionToggle } from "./complete";
-import { scheduleAutosave, clearAutosave, initAutosaveRecovery } from "./autosave";
+import { scheduleAutosave, clearAutosave, flushAutosave, initAutosaveRecovery } from "./autosave";
 import { scheduleAutoUpdateCheck } from "./updater";
 
-export const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+export const md = createMarkdown({ typographer: true });
 
 // 给块级元素注入源码行号，滚动同步用
 const origRenderToken = md.renderer.renderToken.bind(md.renderer);
@@ -164,15 +164,50 @@ export const view = new EditorView({
 
 /* ---------------- 渲染 ---------------- */
 
+function previewScroller(): HTMLElement {
+  return (previewEl.parentElement as HTMLElement | null) ?? previewEl;
+}
+
+function captureAnchor(scroller: HTMLElement): { line: number; delta: number } | null {
+  const top = scroller.getBoundingClientRect().top;
+  let line = -1;
+  let delta = 0;
+  for (const el of previewEl.querySelectorAll<HTMLElement>("[data-line]")) {
+    const d = el.getBoundingClientRect().top - top;
+    if (d <= 24) {
+      line = Number(el.dataset.line);
+      delta = d;
+    } else break;
+  }
+  return line < 0 ? null : { line, delta };
+}
+
+function restoreAnchor(scroller: HTMLElement, anchor: { line: number; delta: number } | null) {
+  if (!anchor) return;
+  const top = scroller.getBoundingClientRect().top;
+  let target: HTMLElement | null = null;
+  for (const el of previewEl.querySelectorAll<HTMLElement>("[data-line]")) {
+    if (Number(el.dataset.line) <= anchor.line) target = el;
+    else break;
+  }
+  if (!target) return;
+  scroller.scrollTop += target.getBoundingClientRect().top - top - anchor.delta;
+}
+
 export function renderPreview() {
+  const scroller = previewScroller();
+  const anchor = captureAnchor(scroller);
   previewEl.innerHTML = md.render(view.state.doc.toString());
   attachRunButtons(previewEl);
+  restoreAnchor(scroller, anchor);
 }
 
 function schedulePreview() {
   if (mode === "editor") return;
   window.clearTimeout(previewTimer);
-  previewTimer = window.setTimeout(renderPreview, 120);
+  const n = view.state.doc.length;
+  const delay = n > 250_000 ? 1500 : n > 50_000 ? 400 : 120;
+  previewTimer = window.setTimeout(renderPreview, delay);
 }
 
 function updateMeta() {
@@ -229,7 +264,7 @@ export function setDoc(text: string, path: string | null) {
 export async function openPath(path: string) {
   if (dirty) {
     if (!confirm("当前文档还没保存，继续打开会丢失修改。继续？")) return;
-    clearAutosave();
+    await clearAutosave();
   }
   try {
     const text = await invoke<string>("read_text_file", { path });
@@ -254,7 +289,7 @@ export async function openFile() {
 export function newFile() {
   if (dirty) {
     if (!confirm("当前文档还没保存，新建会丢失修改。继续？")) return;
-    clearAutosave();
+    void clearAutosave();
   }
   setDoc("", null);
 }
@@ -282,7 +317,7 @@ export async function writeCurrent(): Promise<boolean> {
     });
     dirty = false;
     updateTitle();
-    clearAutosave();
+    await clearAutosave();
     void invoke("add_recent_file", { path: currentPath });
     return true;
   } catch (err) {
@@ -298,10 +333,21 @@ document.querySelectorAll<HTMLButtonElement>("#view-modes button").forEach((btn)
 });
 
 if (win) {
+  let closing = false;
   win.onCloseRequested(async (event) => {
-    if (dirty && !confirm("还有未保存的修改，确定关闭？")) {
-      event.preventDefault();
+    if (closing) return;
+    event.preventDefault();
+    closing = true;
+    try {
+      await flushAutosave();
+    } catch {
+      /* 快照失败不挡住退出 */
     }
+    if (dirty && !confirm("还有未保存的修改，确定关闭？")) {
+      closing = false;
+      return;
+    }
+    await win.destroy();
   });
 }
 
@@ -317,7 +363,7 @@ if (inTauri) {
     if (!path) return;
     if (dirty) {
       if (!confirm("当前文档还没保存，继续会丢失修改。继续？")) return;
-      clearAutosave();
+      await clearAutosave();
     }
     try {
       const text = await invoke<string>("read_text_file", { path });
@@ -391,8 +437,9 @@ view.scrollDOM.addEventListener("scroll", () => {
       else break;
     }
     if (target) {
-      const top = target.getBoundingClientRect().top - previewEl.getBoundingClientRect().top + previewEl.scrollTop;
-      previewEl.scrollTo({ top: Math.max(0, top - 12) });
+      const scroller = previewScroller();
+      const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, top - 12) });
     }
   });
 });

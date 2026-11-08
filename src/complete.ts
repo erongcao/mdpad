@@ -16,7 +16,7 @@ class GhostWidget extends WidgetType {
   toDOM() {
     const span = document.createElement("span");
     span.className = "cm-ghost";
-    span.textContent = this.text.split("\n")[0];
+    span.textContent = this.text;
     return span;
   }
 }
@@ -99,6 +99,7 @@ let enabled = window.localStorage.getItem("mdpad-completion") !== "0";
 let timer: number | undefined;
 let activeId: string | null = null;
 let acc = "";
+let origin = 0;
 let unlisten: (() => void) | null = null;
 
 interface AiConfig { active: string; providers: Record<string, { base_url: string; model: string }> }
@@ -109,10 +110,19 @@ async function ensureListener() {
     const p = e.payload;
     if (!activeId || p.id !== activeId) return;
     if (p.kind === "chunk" && p.text) {
+      const sel = view.state.selection.main;
+      if (sel.head !== origin || !sel.empty) {
+        const id = activeId;
+        activeId = null;
+        acc = "";
+        if (id) void invoke("ai_cancel", { id });
+        clearGhost();
+        return;
+      }
       acc += p.text;
-      // 流式更新幽灵文本（去掉可能的代码块标记）
-      const cleaned = acc.replace(/^```\w*\n?/, "").trimEnd();
-      if (cleaned) view.dispatch({ effects: setGhost.of({ pos: view.state.selection.main.head, text: cleaned }) });
+      // 流式更新幽灵文本（去掉可能的代码块标记）。显示的内容就是 Tab 会插入的内容。
+      const cleaned = acc.replace(/^```\w*\n?/, "").replace(/```\s*$/, "").trimEnd();
+      if (cleaned) view.dispatch({ effects: setGhost.of({ pos: origin, text: cleaned }) });
     } else if (p.kind === "done") {
       activeId = null;
     }
@@ -128,10 +138,13 @@ async function requestCompletion() {
   const cfg = await invoke<AiConfig>("ai_get_config");
   const provider = cfg.providers[cfg.active];
   if (!provider?.base_url || !provider.model) return;
+  const now = view.state.selection.main;
+  if (now.head !== sel.head || !now.empty) return;
 
   if (activeId) void invoke("ai_cancel", { id: activeId });
   activeId = "comp-" + Date.now();
   acc = "";
+  origin = now.head;
   await ensureListener();
   try {
     await invoke("ai_chat_stream", {
@@ -152,9 +165,15 @@ async function requestCompletion() {
 /* ---------------- 触发与开关 ---------------- */
 
 const completionListener = EditorView.updateListener.of((u) => {
-  if (!enabled || !u.docChanged) return;
-  clearGhost();
-  if (activeId) { void invoke("ai_cancel", { id: activeId }); activeId = null; }
+  if (!enabled) return;
+  if (u.docChanged || u.selectionSet) {
+    const id = activeId;
+    activeId = null;
+    acc = "";
+    if (id) void invoke("ai_cancel", { id });
+    if (u.state.field(ghostField)) queueMicrotask(clearGhost);
+  }
+  if (!u.docChanged) return;
   window.clearTimeout(timer);
   timer = window.setTimeout(() => void requestCompletion(), 900);
 });

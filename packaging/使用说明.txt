@@ -1,35 +1,59 @@
-mdpad — 使用说明
-=================
+mdpad — 使用说明 / Notes
+===========================
 
-一个轻量的 macOS Markdown 编辑器（约 9 MB）。
+macOS Markdown 写作台，版本 1.1.1。
+A macOS Markdown desk. Version 1.1.1.
 
-安装
-----
-1. 把左边的 mdpad 拖到右边的「应用程序」文件夹
-2. 第一次打开：在「应用程序」里右键点 mdpad → 选择「打开」→ 再点「打开」
+安装 / Install
+--------------
+1. 把左边的 mdpad 拖到右边的「应用程序」文件夹。
+   Drag mdpad on the left into the Applications folder on the right.
+2. 第一次打开：在「应用程序」里右键 mdpad → 打开 → 再点「打开」。
+   First launch: in Applications, right-click mdpad → Open → Open again.
 
-   这一步只需要做一次。因为我是自己签的，没有买苹果开发者证书（$99/年），
-   所以系统会拦一下。如果右键没有「打开」选项，进去：
-   系统设置 → 隐私与安全性 → 拉到底 → 点「仍要打开」
+   应用没有买苹果公证。右键没有「打开」时：
+   系统设置 → 隐私与安全性 → 拉到底 → 仍要打开。
+   The app is not notarized. If Open is missing from the menu:
+   System Settings → Privacy & Security → Open Anyway.
 
-快捷键
-------
-⌘O        打开文件
-⌘S        保存
-⇧⌘S       另存为
-⌘F        在文中查找
-⌘Z / ⇧⌘Z  撤销 / 重做
+   从 AirDrop 或聊天软件拷过来后若提示「已损坏」，在终端执行一次：
+   If it says the app is damaged after AirDrop or a chat transfer, run once:
+   xattr -cr /Applications/mdpad.app
 
-也可以直接把 .md 文件拖进窗口打开。
+快捷键 / Shortcuts
+------------------
+⌘N           新建 / New
+⌘O           打开 / Open
+⌘S           保存 / Save
+⇧⌘S          另存为 / Save As
+⌘F           查找 / Find
+⌘1 / ⌘2 / ⌘3 源码 / 分栏 / 预览    Source / Split / Preview
+⌘J           AI 对话 / AI chat
+⌘,           AI 设置 / AI settings
+⇧⌘F          专注模式 / Focus mode
 
-界面
-----
-顶部三个按钮：源码 / 分栏 / 预览。
-中间的竖线可以左右拖动，调整两边宽度。
-深色模式跟随系统自动切换。
+也可以把 .md 文件拖进窗口。
+You can also drop a .md file onto the window.
 
-卸载
-----
-把 mdpad 从「应用程序」拖到废纸篓即可，不写任何系统目录。
+数据放在哪里 / Where data lives
+-------------------------------
+稿子只在你保存的路径上。
+崩溃快照、最近文件、AI 的接口地址和日志在：
+~/Library/Application Support/mdpad
+API Key 在 macOS 钥匙串，服务名 com.yirongcao.mdpad。
 
-版本 0.1.0 · 通用二进制（Apple 芯片 + Intel）
+The document stays at the path you save.
+Crash snapshots, recent files, AI endpoints, and the log:
+~/Library/Application Support/mdpad
+API keys are in the macOS Keychain, service com.yirongcao.mdpad.
+
+卸载 / Uninstall
+----------------
+把 mdpad 从「应用程序」拖到废纸篓。
+要连数据一起删，再删掉上面的 Application Support 目录，并在钥匙串访问中删掉 com.yirongcao.mdpad。
+
+Drag mdpad from Applications to the Trash.
+To delete its data too, remove the Application Support folder above and the com.yirongcao.mdpad Keychain item.
+
+完整说明见项目 README.md（英文）和 README.zh-CN.md（中文）。
+Full docs: README.md (English) and README.zh-CN.md (Chinese).

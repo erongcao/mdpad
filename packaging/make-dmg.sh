@@ -19,7 +19,8 @@ fi
 
 APP="$ROOT/src-tauri/target/$ARCH_DIR/release/bundle/macos/mdpad.app"
 OUT_DIR="$ROOT/release"
-OUT="$OUT_DIR/mdpad-0.1.0-$ARCH_LABEL.dmg"
+VERSION="$(node -e "console.log(require('./src-tauri/tauri.conf.json').version)")"
+OUT="$OUT_DIR/mdpad-${VERSION}-$ARCH_LABEL.dmg"
 STAGE="$(mktemp -d)"
 VOLNAME="mdpad"
 

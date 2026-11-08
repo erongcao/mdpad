@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import MarkdownIt from "markdown-it";
+import { createMarkdown } from "./markdown";
 import { view, inTauri } from "./main";
 
-const md = new MarkdownIt({ html: false, linkify: true });
+const md = createMarkdown();
 
 interface ProviderConfig {
   base_url: string;
@@ -173,6 +173,7 @@ async function ensureListener() {
       job.running = false;
       el("#ai-stop").hidden = true;
       setStatus(payload.cancelled ? "已停止" : "完成");
+      renderOutput();
     }
   });
 }
@@ -180,11 +181,20 @@ async function ensureListener() {
 function renderOutput() {
   if (!job) return;
   const out = el("#ai-output");
-  const reasoningHtml = job.reasoning
-    ? `<div class="ai-reasoning">${md.render(job.reasoning)}</div>`
-    : "";
-  out.innerHTML = reasoningHtml + md.render(job.result || "");
-  out.scrollTop = out.scrollHeight;
+  const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 64;
+  if (job.running) {
+    const reasoning = job.reasoning
+      ? `<div class="ai-reasoning ai-stream-text">${escapeHtml(job.reasoning)}</div>`
+      : "";
+    const body = job.result ? `<div class="ai-stream-text">${escapeHtml(job.result)}</div>` : "";
+    out.innerHTML = reasoning + body;
+  } else {
+    const reasoningHtml = job.reasoning
+      ? `<div class="ai-reasoning">${md.render(job.reasoning)}</div>`
+      : "";
+    out.innerHTML = reasoningHtml + (job.result ? md.render(job.result) : "");
+  }
+  if (stick) out.scrollTop = out.scrollHeight;
 }
 
 /* ---------------- 抽屉 ---------------- */
@@ -394,15 +404,17 @@ async function fetchModels() {
     return;
   }
   const keyInField = el<HTMLInputElement>("#ai-api-key").value;
+  const provider = currentPresetKey();
   setSettingsStatus("拉取中…");
   try {
-    // 输入框里有新 key：先写进钥匙串，保证「拉取」用的就是眼前这串
+    // 密钥只发给已保存或刚刚显式放行的地址，取消设置不会把地址写进配置
+    await invoke("ai_allow_base_url", { provider, baseUrl });
     if (keyInField) {
-      await invoke("ai_set_api_key", { provider: currentPresetKey(), key: keyInField });
+      await invoke("ai_set_api_key", { provider, key: keyInField });
       el<HTMLElement>("#ai-key-clear").hidden = false;
       el("#ai-key-hint").textContent = "已保存在 macOS 钥匙串，输入新值可更换";
     }
-    const models = await invoke<string[]>("ai_list_models", { baseUrl, provider: currentPresetKey() });
+    const models = await invoke<string[]>("ai_list_models", { baseUrl, provider });
     fillModelList(models);
     setSettingsStatus(models.length ? `找到 ${models.length} 个模型` : "列表为空，请手填模型名");
   } catch (err) {
@@ -503,6 +515,8 @@ export function initAi() {
       el<HTMLInputElement>("#ai-api-key").value = "";
       el<HTMLElement>("#ai-key-clear").hidden = true;
       el("#ai-key-hint").textContent = PRESETS[key]?.keyHint ?? "";
+    }).catch((err) => {
+      setSettingsStatus(String(err));
     });
   });
   el<HTMLSelectElement>("#ai-model-select").addEventListener("change", (e) => {

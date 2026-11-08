@@ -3,14 +3,27 @@ import { view, setDoc, markDirty, getCurrentPath, isDirty, inTauri } from "./mai
 
 /**
  * 崩溃/意外退出保护：
- * - 文档每次变动后 1.5s 落一份快照
- * - Tauri 内走 Rust 原子写文件（kill -9 也不丢）；浏览器 dev 环境退到 localStorage
- * - 保存成功或用户明确放弃修改时清除快照
- * - 下次启动发现快照 → 顶部横幅询问恢复/丢弃
+ * - 停手 0.8 秒落快照；连续打字最多 2 秒也落一次
+ * - 写和删排成一队，保存完成后的清除不会被还在飞的快照盖回去
+ * - 关闭窗口前再刷一次，正常退出不丢最后一次按键
+ * - Tauri 内走 Rust 原子写文件；浏览器 dev 环境退到 localStorage
  */
 
 const KEY = "mdpad.autosave.v1";
+const DEBOUNCE_MS = 800;
+const MAX_WAIT_MS = 2000;
 let timer: number | undefined;
+let burstAt: number | undefined;
+let tail: Promise<void> = Promise.resolve();
+
+function enqueue(task: () => Promise<void>): Promise<void> {
+  const run = tail.then(task, task);
+  tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
 
 interface Snapshot {
   path: string | null;
@@ -19,14 +32,21 @@ interface Snapshot {
 }
 
 export function scheduleAutosave(): void {
+  const now = Date.now();
+  if (burstAt === undefined) burstAt = now;
   window.clearTimeout(timer);
-  timer = window.setTimeout(() => void snapshotNow(), 1500);
+  const elapsed = now - burstAt;
+  const delay = elapsed >= MAX_WAIT_MS ? 0 : Math.min(DEBOUNCE_MS, MAX_WAIT_MS - elapsed);
+  timer = window.setTimeout(() => {
+    burstAt = undefined;
+    timer = undefined;
+    void enqueue(writeSnapshot);
+  }, delay);
 }
 
-async function snapshotNow(): Promise<void> {
-  // 只在有未保存修改时保留快照；刚打开/刚保存的文档不产生恢复横幅
+async function writeSnapshot(): Promise<void> {
   if (!isDirty()) {
-    await clearAutosave();
+    await clearBody();
     return;
   }
   const snap: Snapshot = {
@@ -34,6 +54,10 @@ async function snapshotNow(): Promise<void> {
     content: view.state.doc.toString(),
     ts: Date.now(),
   };
+  if (!isDirty()) {
+    await clearBody();
+    return;
+  }
   const raw = JSON.stringify(snap);
   if (inTauri) {
     try {
@@ -50,8 +74,7 @@ async function snapshotNow(): Promise<void> {
   }
 }
 
-export async function clearAutosave(): Promise<void> {
-  window.clearTimeout(timer);
+async function clearBody(): Promise<void> {
   if (inTauri) {
     try {
       await invoke("autosave_clear");
@@ -64,6 +87,21 @@ export async function clearAutosave(): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+export function clearAutosave(): Promise<void> {
+  window.clearTimeout(timer);
+  timer = undefined;
+  burstAt = undefined;
+  return enqueue(clearBody);
+}
+
+/** 关掉防抖，立刻把当前未保存内容写入快照队列。 */
+export function flushAutosave(): Promise<void> {
+  window.clearTimeout(timer);
+  timer = undefined;
+  burstAt = undefined;
+  return enqueue(writeSnapshot);
 }
 
 async function loadSnapshot(): Promise<Snapshot | null> {
@@ -114,7 +152,7 @@ function showBanner(snap: Snapshot): void {
   restore.addEventListener("click", () => {
     setDoc(snap.content, snap.path);
     markDirty();
-    void snapshotNow();
+    void flushAutosave();
     bar.remove();
   });
 
