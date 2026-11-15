@@ -4,7 +4,7 @@
 
 A native macOS Markdown writing desk. CodeMirror 6 for editing, an AI writing assistant, locally executable code blocks, and pandoc export. The shell is Tauri 2, about 6 MB, with no bundled Chromium or Node runtime.
 
-Current version: **1.1.3**.
+Current version: **1.1.4**.
 
 ![mdpad — split view with AI panel](docs/screenshots/main.png)
 
@@ -19,6 +19,12 @@ mdpad is built around one loop: write, let AI help, run your code, export the re
 - Export: Word and standalone HTML via pandoc, PDF via the system print dialog, one-click copy styled for the WeChat Official Account editor
 - Privacy: the file stays on disk. API keys stay in the macOS Keychain. The preview shows local images beside the document. Remote images are not fetched
 - Updates: signed updates from GitHub Releases (mdpad menu → 检查更新). After a crash, a banner offers to restore unsaved work
+
+## What changed in 1.1.4
+
+- The red close button and Close Window (⌘W) close the window. In 1.1.3 the close was cancelled, and the follow-up destroy call had no permission, so the window stayed open
+- Quit mdpad (⌘Q) still exits the whole application. The process can remain in the Dock after the window closes
+- Unsaved edits still ask before the window closes. Cancel keeps the window. The crash snapshot is written first, and it does not count as a save
 
 ## What changed in 1.1.3
 
@@ -54,7 +60,7 @@ Reliability and privacy fixes. No new editing features.
 
 - CodeMirror 6, incremental parsing
 - Source / split / preview (⌘1 / ⌘2 / ⌘3), live render with markdown-it
-- Native menus: New ⌘N, Open ⌘O, Open Recent, Save ⌘S, Save As ⇧⌘S, Close ⌘W
+- Native menus: New ⌘N, Open ⌘O, Open Recent, Save ⌘S, Save As ⇧⌘S, Close Window ⌘W. The red close button does the same thing. Quit mdpad (⌘Q) exits the app
 - Drag a `.md`, `.markdown`, `.mdown`, or `.txt` file onto the window. Find ⌘F, replace ⌥⌘F
 - Word count treats CJK characters and Latin words separately. Light and dark follow the system
 
@@ -174,7 +180,7 @@ npm run tauri build  # release bundle in src-tauri/target/release/bundle/
 A signed update build, when `~/.tauri/mdpad.key` is present:
 
 ```bash
-scripts/release.sh 1.1.3 "notes"
+scripts/release.sh 1.1.4 "notes"
 ```
 
 ## Tech stack

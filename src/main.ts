@@ -335,21 +335,24 @@ document.querySelectorAll<HTMLButtonElement>("#view-modes button").forEach((btn)
 });
 
 if (win) {
-  let closing = false;
+  // 一旦注册了这个监听，系统关闭会被先取消。只有这里不调用 preventDefault，
+  // Tauri 才会接着 destroy 窗口。自己再调 destroy 没有权限，窗口就关不掉。
+  let deciding = false;
   win.onCloseRequested(async (event) => {
-    if (closing) return;
-    event.preventDefault();
-    closing = true;
+    if (deciding) {
+      event.preventDefault();
+      return;
+    }
+    deciding = true;
     try {
       await flushAutosave();
     } catch {
-      /* 快照失败不挡住退出 */
+      /* 快照失败不挡住关闭 */
     }
     if (dirty && !confirm("还有未保存的修改，确定关闭？")) {
-      closing = false;
-      return;
+      event.preventDefault();
+      deciding = false;
     }
-    await win.destroy();
   });
 }
 
